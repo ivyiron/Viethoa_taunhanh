@@ -361,11 +361,11 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
             Trình thiết kế Dấu & Mũ phụ (Tab 1: Component Studio)
           </h4>
           <p className="text-xs text-neutral-400 max-w-xl">
-            Hệ thống sẽ đề xuất các mẫu dấu câu dựa trên các ký tự có sẵ n của font chữ. Cơ mà nếu nó xấu quá, hãy tự design lại dấu trong illustrator rồi copy paste vào ô mã SVG.
+            Hệ thống sẽ đề xuất các mẫu dấu câu dựa trên các ký tự có sẵn của font chữ. Cơ mà nếu nó xấu quá, hãy tự design lại dấu trong illustrator rồi copy paste vào ô mã SVG.
           </p>
         </div>
         <div className="text-xs bg-neutral-800 text-neutral-300 border border-neutral-700/50 rounded-lg py-1.5 px-3">
-          Tối ưu hóa thời gian: <strong>giảm 95% thao tác thủ công!</strong>
+          <strong>Nhày font trong một nốt nhạc</strong>
         </div>
       </div>
 
