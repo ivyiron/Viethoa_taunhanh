@@ -601,6 +601,34 @@ export function removeDotFromICommands(commands: any[]): any[] {
 }
 
 /**
+ * Helper to extract glyph indexes from an opentype.js coverage table,
+ * correctly supporting both Format 1 (individual glyphs list) and Format 2 (glyph ranges).
+ */
+export function getCoverageGlyphs(coverage: any): number[] {
+  if (!coverage) return [];
+  if (coverage.format === 1 && Array.isArray(coverage.glyphs)) {
+    return coverage.glyphs;
+  }
+  if (coverage.format === 2 && Array.isArray(coverage.ranges)) {
+    const glyphs: number[] = [];
+    for (const r of coverage.ranges) {
+      const start = r.start !== undefined ? r.start : r.startGlyphID;
+      const end = r.end !== undefined ? r.end : r.endGlyphID;
+      if (typeof start === 'number' && typeof end === 'number') {
+        for (let g = start; g <= end; g++) {
+          glyphs.push(g);
+        }
+      }
+    }
+    return glyphs;
+  }
+  if (Array.isArray(coverage.glyphs)) {
+    return coverage.glyphs;
+  }
+  return [];
+}
+
+/**
  * Extracts and converts GPOS kerning tables (Format 1 and Format 2 Class-based positioning)
  * into standard font.kerningPairs so they can be written as standard 'kern' table pairs when saved,
  * and utilized for smart Vietnamese character kerning cloning.
@@ -622,8 +650,9 @@ export function ensureKerningPairsPopulated(font: any): void {
           // Format 1: Pair Adjustment (Specific glyph pairs)
           if (posFormat === 1) {
             const coverage = subtable.coverage;
-            if (!coverage || !coverage.glyphs) continue;
-            const leftGlyphs = coverage.glyphs;
+            if (!coverage) continue;
+            const leftGlyphs = getCoverageGlyphs(coverage);
+            if (leftGlyphs.length === 0) continue;
             const pairSets = subtable.pairSets || [];
             
             for (let i = 0; i < leftGlyphs.length; i++) {
@@ -688,7 +717,7 @@ export function ensureKerningPairsPopulated(font: any): void {
             const class2ToGlyphs: Record<number, number[]> = {};
 
             // Class 1 (left glyphs) MUST be in the coverage table to be valid
-            const coverageGlyphs = subtable.coverage?.glyphs || [];
+            const coverageGlyphs = getCoverageGlyphs(subtable.coverage);
             for (const g of coverageGlyphs) {
               const c1 = getGlyphClass(classDef1, g);
               if (c1 < class1Count) {

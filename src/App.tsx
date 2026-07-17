@@ -335,45 +335,62 @@ export default function App() {
       const pairs = font.kerningPairs as Record<string, number>;
       const newPairs: Record<string, number> = {};
 
+      // Map base glyph index to all of its Vietnamese variants' glyph indexes
+      const baseIndexToVariants: Record<number, number[]> = {};
       VIETNAMESE_RECIPES.forEach(recipe => {
         const baseChar = recipe.baseChar;
         const targetIndex = getGlyphIndexForChar(recipe.char);
         const baseIndex = getGlyphIndexForChar(baseChar);
-
-        if (targetIndex > 0 && baseIndex > 0 && targetIndex !== baseIndex) {
-          const horn = charHornInfo[recipe.char];
-
-          for (const [key, val] of Object.entries(pairs)) {
-            const parts = key.split(',');
-            if (parts.length !== 2) continue;
-            const idx1 = parseInt(parts[0], 10);
-            const idx2 = parseInt(parts[1], 10);
-
-            if (idx1 === baseIndex && idx2 === baseIndex) {
-              let valLeftRight = val;
-              let valLeftBase = val;
-              let valBaseRight = val;
-
-              if (horn) {
-                valLeftRight = adjustClonedKern(horn, val, targetIndex);
-                valLeftBase = adjustClonedKern(horn, val, baseIndex);
-              }
-
-              newPairs[`${targetIndex},${targetIndex}`] = valLeftRight;
-              newPairs[`${targetIndex},${baseIndex}`] = valLeftBase;
-              newPairs[`${baseIndex},${targetIndex}`] = valBaseRight;
-            } else if (idx1 === baseIndex) {
-              let adjustedVal = val;
-              if (horn) {
-                adjustedVal = adjustClonedKern(horn, val, idx2);
-              }
-              newPairs[`${targetIndex},${idx2}`] = adjustedVal;
-            } else if (idx2 === baseIndex) {
-              newPairs[`${idx1},${targetIndex}`] = val;
-            }
+        if (baseIndex > 0 && targetIndex > 0 && baseIndex !== targetIndex) {
+          if (!baseIndexToVariants[baseIndex]) {
+            baseIndexToVariants[baseIndex] = [];
+          }
+          if (!baseIndexToVariants[baseIndex].includes(targetIndex)) {
+            baseIndexToVariants[baseIndex].push(targetIndex);
           }
         }
       });
+
+      // Loop over every original kerning pair and expand it to all combinations of its base & variant characters
+      for (const [key, val] of Object.entries(pairs)) {
+        const parts = key.split(',');
+        if (parts.length !== 2) continue;
+        const g1 = parseInt(parts[0], 10);
+        const g2 = parseInt(parts[1], 10);
+
+        // Get all variants (including base) for left and right
+        const leftCandidates = [g1];
+        if (baseIndexToVariants[g1]) {
+          leftCandidates.push(...baseIndexToVariants[g1]);
+        }
+
+        const rightCandidates = [g2];
+        if (baseIndexToVariants[g2]) {
+          rightCandidates.push(...baseIndexToVariants[g2]);
+        }
+
+        // If either side has variants, expand to all pair combinations
+        if (leftCandidates.length > 1 || rightCandidates.length > 1) {
+          leftCandidates.forEach(g1_cand => {
+            rightCandidates.forEach(g2_cand => {
+              // Skip the original base pair itself to avoid overwriting
+              if (g1_cand === g1 && g2_cand === g2) return;
+
+              // Check if we need horn adjustments (for the left character if it has a horn)
+              let adjustedVal = val;
+              const recipeForCand = VIETNAMESE_RECIPES.find(r => getGlyphIndexForChar(r.char) === g1_cand);
+              if (recipeForCand) {
+                const horn = charHornInfo[recipeForCand.char];
+                if (horn) {
+                  adjustedVal = adjustClonedKern(horn, val, g2_cand);
+                }
+              }
+
+              newPairs[`${g1_cand},${g2_cand}`] = adjustedVal;
+            });
+          });
+        }
+      }
 
       Object.assign(pairs, newPairs);
 
