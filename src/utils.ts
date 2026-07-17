@@ -520,6 +520,86 @@ export function getExactBoundingBox(cmds: any[]): { xMin: number; xMax: number; 
   return { xMin, xMax, yMin, yMax };
 }
 
+function getSubpaths(commands: any[]): any[][] {
+  const subpaths: any[][] = [];
+  let current: any[] = [];
+  commands.forEach(cmd => {
+    if (cmd.type === 'M') {
+      if (current.length > 0) {
+        subpaths.push(current);
+      }
+      current = [cmd];
+    } else {
+      current.push(cmd);
+    }
+  });
+  if (current.length > 0) {
+    subpaths.push(current);
+  }
+  return subpaths;
+}
+
+function getSubpathBBox(cmds: any[]) {
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  const update = (x: number, y: number) => {
+    if (x < xMin) xMin = x;
+    if (x > xMax) xMax = x;
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
+  };
+  cmds.forEach(cmd => {
+    if (cmd.x !== undefined && cmd.y !== undefined) update(cmd.x, cmd.y);
+    if (cmd.x1 !== undefined && cmd.y1 !== undefined) update(cmd.x1, cmd.y1);
+    if (cmd.x2 !== undefined && cmd.y2 !== undefined) update(cmd.x2, cmd.y2);
+  });
+  return { xMin, xMax, yMin, yMax };
+}
+
+export function removeDotFromICommands(commands: any[]): any[] {
+  const subpaths = getSubpaths(commands);
+  if (subpaths.length <= 1) {
+    return commands;
+  }
+
+  const bboxes = subpaths.map(cmds => getSubpathBBox(cmds));
+  
+  let overallYMax = -Infinity;
+  let overallYMin = Infinity;
+  bboxes.forEach(box => {
+    if (box.yMax > overallYMax) overallYMax = box.yMax;
+    if (box.yMin < overallYMin) overallYMin = box.yMin;
+  });
+
+  const totalHeight = overallYMax - overallYMin;
+  if (totalHeight < 100) return commands;
+
+  const thresholdY = overallYMin + 0.45 * totalHeight;
+
+  const filteredSubpaths = subpaths.filter((cmds, idx) => {
+    const box = bboxes[idx];
+    const isTopmost = box.yMax === overallYMax;
+    const isAboveThreshold = box.yMin > thresholdY;
+    
+    if (isTopmost && box.yMin > overallYMin + 0.25 * totalHeight) {
+      return false; // This is the dot, remove it
+    }
+    if (isAboveThreshold) {
+      return false; // This is also a dot, remove it
+    }
+    return true; // Keep this contour
+  });
+
+  if (filteredSubpaths.length === 0) {
+    return commands;
+  }
+
+  const resultCommands: any[] = [];
+  filteredSubpaths.forEach(cmds => {
+    resultCommands.push(...cmds);
+  });
+  return resultCommands;
+}
+
 /**
  * Extracts and converts GPOS kerning tables (Format 1 and Format 2 Class-based positioning)
  * into standard font.kerningPairs so they can be written as standard 'kern' table pairs when saved,
@@ -1222,12 +1302,26 @@ export function composeGlyphPath(
     return { path: new opentype.Path(), advanceWidth: 500 };
   }
 
-  const baseBBox = baseGlyph.getBoundingBox();
   const upm = font.unitsPerEm || 1000;
   
+  // Get base commands and programmatically strip dot if it's 'i' to guarantee dotless output
+  let baseCmds = baseGlyph.path.commands;
+  if (recipe.baseChar === 'i' && recipe.components.length > 0) {
+    baseCmds = removeDotFromICommands(baseCmds);
+  }
+
+  // Recalculate bounding box based on actual dotless commands if we stripped it
+  const baseBBox = baseGlyph.getBoundingBox();
+  if (recipe.baseChar === 'i' && recipe.components.length > 0) {
+    const tightBox = getExactBoundingBox(baseCmds);
+    baseBBox.x1 = tightBox.xMin;
+    baseBBox.y1 = tightBox.yMin;
+    baseBBox.x2 = tightBox.xMax;
+    baseBBox.y2 = tightBox.yMax;
+  }
+
   // Clone the base glyph path
   const compositePath = new opentype.Path();
-  const baseCmds = baseGlyph.path.commands;
   
   // Re-push original glyph commands safely
   baseCmds.forEach(cmd => {

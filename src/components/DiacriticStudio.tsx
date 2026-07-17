@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as opentype from 'opentype.js';
 import { Sliders, Sparkles, Copy, Trash2, ArrowLeftRight, Link, Link2Off, ZoomIn, ZoomOut, RotateCcw, AlertCircle, HelpCircle, Check } from 'lucide-react';
 import { DiacriticTemplate, AutoPositionRules, FontMetadata } from '../types';
-import { getExactBoundingBox, parseSvgPath, extractPathDataFromSvg, transformCommands, calculateAutoPosition, DEFAULT_DIACRITICS, findCandidateGlyph, extractSvgFromGlyph } from '../utils';
+import { getExactBoundingBox, removeDotFromICommands, parseSvgPath, extractPathDataFromSvg, transformCommands, calculateAutoPosition, DEFAULT_DIACRITICS, findCandidateGlyph, extractSvgFromGlyph } from '../utils';
 
 interface DiacriticStudioProps {
   font: opentype.Font;
@@ -159,12 +159,53 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
     drawVerticalGuide(advanceWidth, 'RSB', '#93c5fd');
 
     const baseGlyph = font.charToGlyph(refChar);
-    const baseBBox = baseGlyph ? baseGlyph.getBoundingBox() : { x1: 50, y1: 0, x2: 450, y2: fontMetadata.xHeight };
+    let baseBBox = baseGlyph ? baseGlyph.getBoundingBox() : { x1: 50, y1: 0, x2: 450, y2: fontMetadata.xHeight };
+
+    if (refChar === 'i' && baseGlyph) {
+      const dotlessCmds = removeDotFromICommands(baseGlyph.path.commands);
+      const tightBox = getExactBoundingBox(dotlessCmds);
+      baseBBox = {
+        x1: tightBox.xMin,
+        y1: tightBox.yMin,
+        x2: tightBox.xMax,
+        y2: tightBox.yMax
+      };
+    }
 
     // Draw reference letter outline
     if (showReference && baseGlyph) {
       ctx.setLineDash([]);
-      const fontPath = baseGlyph.getPath(fontStartX, baselineY, scaleFactor * upm);
+      let fontPath: any;
+
+      if (refChar === 'i') {
+        const dotlessCmds = removeDotFromICommands(baseGlyph.path.commands);
+        fontPath = new opentype.Path();
+        dotlessCmds.forEach((cmd: any) => {
+          const xScale = scaleFactor;
+          const yScale = scaleFactor;
+          if (cmd.type === 'M') {
+            fontPath.moveTo(fontStartX + cmd.x * xScale, baselineY - cmd.y * yScale);
+          } else if (cmd.type === 'L') {
+            fontPath.lineTo(fontStartX + cmd.x * xScale, baselineY - cmd.y * yScale);
+          } else if (cmd.type === 'Q') {
+            fontPath.quadTo(
+              fontStartX + cmd.x1 * xScale, baselineY - cmd.y1 * yScale,
+              fontStartX + cmd.x * xScale, baselineY - cmd.y * yScale
+            );
+          } else if (cmd.type === 'C') {
+            fontPath.curveTo(
+              fontStartX + cmd.x1 * xScale, baselineY - cmd.y1 * yScale,
+              fontStartX + cmd.x2 * xScale, baselineY - cmd.y2 * yScale,
+              fontStartX + cmd.x * xScale, baselineY - cmd.y * yScale
+            );
+          } else if (cmd.type === 'Z') {
+            fontPath.closePath();
+          }
+        });
+      } else {
+        fontPath = baseGlyph.getPath(fontStartX, baselineY, scaleFactor * upm);
+      }
+
       fontPath.fill = `rgba(148, 163, 184, ${bgOpacity / 100})`;
       fontPath.stroke = `rgba(100, 116, 139, ${Math.min(0.9, (bgOpacity + 15) / 100)})`;
       fontPath.lineWidth = 1;
@@ -276,7 +317,7 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
         ctx.stroke();
       }
     }
-  }, [font, fontMetadata, templates, rules, activeDiaId, zoom, showReference, bgOpacity, isCapitalPreview]);
+  }, [font, fontMetadata, templates, rules, activeDiaId, zoom, showReference, bgOpacity, isCapitalPreview, selectedBaseChar]);
 
   const updateActiveValue = (updates: Partial<DiacriticTemplate>) => {
     if (!activeTemplate) return;
@@ -358,14 +399,15 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
         <div className="space-y-1 text-center sm:text-left">
           <h4 className="text-sm font-bold text-white flex items-center justify-center sm:justify-start gap-1.5">
             <Sparkles className="w-4 h-4 text-amber-400" />
-            Trình thiết kế Dấu & Mũ phụ (Tab 1: Component Studio)
+            Trình thiết kế Dấu & Mũ phụ
           </h4>
           <p className="text-xs text-neutral-400 max-w-xl">
-            Hệ thống sẽ đề xuất các mẫu dấu câu dựa trên các ký tự có sẵn của font chữ. Cơ mà nếu nó xấu quá, hãy tự design lại dấu trong illustrator rồi copy paste vào ô mã SVG.
+            Hệ thống sẽ đề xuất các mẫu dấu câu dựa trên các ký tự có sẵn của font chữ.
+            Cơ mà nếu nó xấu quá, hãy tự design lại dấu trong illustrator rồi copy paste vào ô mã SVG.
           </p>
         </div>
         <div className="text-xs bg-neutral-800 text-neutral-300 border border-neutral-700/50 rounded-lg py-1.5 px-3">
-          <strong>Nhày font trong một nốt nhạc</strong>
+          <strong>nhày font trong 1 nốt nhạc</strong>
         </div>
       </div>
 
@@ -403,7 +445,7 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
         <div className="lg:col-span-5 flex flex-col bg-white border border-neutral-100 rounded-2xl p-5 shadow-xs">
           <div className="flex justify-between items-center mb-3">
             <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">
-              Màn Vẽ Chạy Thử dấu mẫu
+              Test dấu mẫu
             </h4>
             
             <label className="flex items-center gap-1.5 text-[10px] text-neutral-500 cursor-pointer select-none">
@@ -508,7 +550,7 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
           </div>
 
           <p className="text-[10px] text-neutral-400 mt-2.5 leading-relaxed">
-            * Trục X luôn được tự động **căn thẳng tắp theo tâm ngang** của chữ cái gốc. Trục Y tự động nhảy lên đỉnh (hoặc chân đối với dấu nặng) dựa theo kích thước Bounding Box của font gốc.
+            * Trục X luôn được tự động **căn thẳng theo tâm ngang** của chữ cái gốc. Trục Y tự động nhảy lên đỉnh (hoặc chân đối với dấu nặng) dựa theo kích thước Bounding Box của font gốc.
           </p>
         </div>
 

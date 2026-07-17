@@ -508,7 +508,7 @@ export default function App() {
                   }`}
                 >
                   <Settings2 className="w-4 h-4" />
-                  <span>Bước 1: ⚙️ Thiết kế 9 Dấu Mẫu (Component Studio)</span>
+                  <span>Bước 1: Thiết kế 9 mẫu dấu</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('composite')}
@@ -519,7 +519,7 @@ export default function App() {
                   }`}
                 >
                   <LayoutGrid className="w-4 h-4" />
-                  <span>Bước 2: 🎯 Bản đồ 134 chữ Tự Động (Auto-Composite Board)</span>
+                  <span>Bước 2: Căn chỉnh nâng cao (nếu bạn thực sự có tâm)</span>
                 </button>
               </div>
 
@@ -628,7 +628,8 @@ export default function App() {
                     id="btn-recompile"
                     onClick={() => handleCompileFont(false)}
                     disabled={compiling}
-                    className="flex-1 sm:flex-none py-2.5 px-4 font-semibold text-xs border border-neutral-700 hover:border-neutral-500 hover:bg-neutral-800 text-white rounded-lg flex items-center justify-center gap-1.5 transition disabled:opacity-45 cursor-pointer"
+                    className="flex-1 sm:flex-none py-2.5 px-4 font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition disabled:opacity-45 cursor-pointer text-neutral-950 border border-transparent hover:opacity-90"
+                    style={{ backgroundColor: '#ffa400' }}
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${compiling ? 'animate-spin' : ''}`} />
                     Cập nhật & Chạy thử
@@ -638,7 +639,8 @@ export default function App() {
                     id="btn-download"
                     onClick={() => handleCompileFont(true)}
                     disabled={compiling}
-                    className="flex-1 sm:flex-none py-2.5 px-5 font-bold text-xs bg-white text-neutral-900 rounded-lg hover:bg-neutral-100 flex items-center justify-center gap-1.5 transition shadow-xs disabled:opacity-45 cursor-pointer"
+                    className="flex-1 sm:flex-none py-2.5 px-5 font-bold text-xs rounded-lg hover:opacity-90 flex items-center justify-center gap-1.5 transition shadow-xs disabled:opacity-45 cursor-pointer border border-transparent"
+                    style={{ backgroundColor: '#0077ff', color: '#ffffff' }}
                   >
                     <Download className="w-4 h-4" />
                     Tải Font Mới (.otf / .ttf)
