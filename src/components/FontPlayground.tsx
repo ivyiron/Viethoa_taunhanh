@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Type } from 'lucide-react';
+import { Type, AlignLeft, AlignCenter, AlignRight, Moon, Sun, Sparkles } from 'lucide-react';
 import * as opentype from 'opentype.js';
 
 interface FontPlaygroundProps {
@@ -14,8 +14,12 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
   fontFamilyName = 'VietnameseizedFontPreview'
 }) => {
   const [inputText, setInputText] = useState(DEFAULT_SENTENCE);
-  const [fontSize, setFontSize] = useState(32);
-  const [lineHeight, setLineHeight] = useState(1.4); // Leading / Line height state
+  const [fontSize, setFontSize] = useState(36);
+  const [lineHeight, setLineHeight] = useState(1.4);
+  const [textAlign, setTextAlign] = useState<'left' | 'center' | 'right'>('left');
+  const [bgTheme, setBgTheme] = useState<'light' | 'dark' | 'paper' | 'black'>('light');
+  const [boxHeightMode, setBoxHeightMode] = useState<'medium' | 'large' | 'auto'>('medium');
+
   const [fontRegistered, setFontRegistered] = useState(false);
   const [activeFamilyName, setActiveFamilyName] = useState(fontFamilyName);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -70,7 +74,6 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
         document.fonts.add(loadedFace);
         setActiveFamilyName(uniqueName);
         setFontRegistered(true);
-        console.log(`Successfully registered dynamic font face: ${uniqueName}`);
       } catch (err: any) {
         console.error('FontFace registration failed', err);
         setLoadError('Không thể nạp font vào trình duyệt để chạy thử: ' + (err.message || 'Lỗi không xác định'));
@@ -127,7 +130,6 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
           const rightIndex = parsedFont.charToGlyphIndex(nextChar);
           if (leftIndex > 0 && rightIndex > 0) {
             const pairKey = `${leftIndex},${rightIndex}`;
-            // Prioritize reading directly from parsedFont.kerningPairs first
             if (parsedFont.kerningPairs && parsedFont.kerningPairs[pairKey] !== undefined) {
               kernValue = parsedFont.kerningPairs[pairKey];
             } else {
@@ -190,146 +192,321 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
       });
 
       lineElements.push(
-        <div key={`line-${lineIdx}`} className="min-h-[1.2em] w-full" style={{ lineHeight: lineHeight }}>
+        <div 
+          key={`line-${lineIdx}`} 
+          className="min-h-[1.2em] w-full" 
+          style={{ 
+            lineHeight: lineHeight,
+            textAlign: textAlign
+          }}
+        >
           {wordElements.length > 0 ? wordElements : <br />}
         </div>
       );
     });
 
-    return <div className="w-full text-left">{lineElements}</div>;
+    return <div className="w-full" style={{ textAlign: textAlign }}>{lineElements}</div>;
+  };
+
+  const getThemeClasses = () => {
+    switch (bgTheme) {
+      case 'dark':
+        return 'bg-neutral-900 text-neutral-100 border-neutral-800';
+      case 'black':
+        return 'bg-black text-amber-200 border-neutral-900';
+      case 'paper':
+        return 'bg-[#FAF6EE] text-[#2C2621] border-[#EADFCB]';
+      case 'light':
+      default:
+        return 'bg-neutral-50 text-neutral-900 border-neutral-200';
+    }
+  };
+
+  const getHeightStyle = () => {
+    switch (boxHeightMode) {
+      case 'large':
+        return 'min-h-[380px] h-[380px]';
+      case 'auto':
+        return 'min-h-[200px] h-auto';
+      case 'medium':
+      default:
+        return 'min-h-[240px] h-[240px]';
+    }
   };
 
   return (
-    <div id="font-playground-panel" className="bg-white border border-neutral-100 rounded-xl p-6 shadow-xs">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-neutral-100 pb-4 mb-4 gap-4">
-        <div>
-          <h3 className="text-base font-bold text-neutral-900 flex items-center gap-2">
-            <Type className="w-5 h-5 text-neutral-800" />
-            Vùng Chạy Thử Font Chữ (Live Playground)
-          </h3>
-          <p className="text-xs text-neutral-500 mt-0.5">
-            Gõ văn bản tiếng Việt bất kỳ dưới đây để kiểm tra trực tiếp các nét Việt hóa, độ rộng và kerning của font.
-          </p>
+    <div id="font-playground-panel" className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-xs space-y-5">
+      
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-neutral-100 pb-4 gap-4">
+        <div className="flex items-start sm:items-center gap-3">
+          <span className="p-2 bg-neutral-900 text-white rounded-xl inline-flex items-center justify-center shrink-0 shadow-2xs">
+            <Type className="w-4.5 h-4.5 text-amber-400" />
+          </span>
+          <div>
+            <h3 className="text-base font-extrabold text-neutral-950 tracking-tight">
+              Trình Gõ Thử Font (Test Font)
+            </h3>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Kiểm tra trực tiếp kết quả Việt hóa, Kerning và khoảng cách hiển thị thực tế trên khung làm việc tràn màn hình.
+            </p>
+          </div>
         </div>
 
         {/* Status Indicator */}
-        <div className="flex items-center gap-1.5">
+        <div>
           {fontRegistered ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-50 text-green-700 text-xs font-semibold rounded-full border border-green-100">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping"></span>
-              Đã nạp font thành công
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 text-xs font-bold rounded-xl border border-green-200/80">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-ping"></span>
+              Font đang hoạt động
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-neutral-100 text-neutral-500 text-xs font-semibold rounded-full border border-neutral-200">
-              Đang đợi xuất bản font...
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 text-neutral-500 text-xs font-bold rounded-xl border border-neutral-200">
+              Chưa nạp xuất bản...
             </span>
           )}
         </div>
       </div>
 
       {loadError && (
-        <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs border border-red-100 rounded-lg">
+        <div className="p-3 bg-red-50 text-red-600 text-xs border border-red-100 rounded-xl">
           {loadError}
         </div>
       )}
 
-      {/* Font Size & Presets bar */}
-      <div className="flex flex-wrap gap-4 items-center justify-between mb-4 bg-neutral-50 p-3 rounded-lg border border-neutral-100/60">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 w-full sm:w-auto">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-neutral-600 font-medium">Cỡ chữ:</span>
-            <input
-              id="slider-playground-font-size"
-              type="range"
-              min="12"
-              max="120"
-              step="1"
-              value={fontSize}
-              onChange={(e) => setFontSize(parseInt(e.target.value))}
-              className="accent-neutral-800 w-24 sm:w-32"
-            />
-            <span className="text-xs text-neutral-700 font-mono font-bold w-10">{fontSize}px</span>
+      {/* Control Bar: Sliders, Preset Buttons, Theme, Alignment */}
+      <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          
+          {/* Sliders: Size & Line height */}
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs text-neutral-600 font-bold">Cỡ chữ:</span>
+              <input
+                id="slider-playground-font-size"
+                type="range"
+                min="12"
+                max="140"
+                step="1"
+                value={fontSize}
+                onChange={(e) => setFontSize(parseInt(e.target.value))}
+                className="accent-neutral-900 w-28 sm:w-36 cursor-pointer"
+              />
+              <span className="text-xs text-neutral-900 font-mono font-bold w-12">{fontSize}px</span>
+            </div>
+
+            {/* Quick Font Size Presets */}
+            <div className="hidden md:flex items-center gap-1">
+              {[24, 36, 48, 64, 80].map((sz) => (
+                <button
+                  key={sz}
+                  onClick={() => setFontSize(sz)}
+                  className={`text-[11px] font-mono px-2 py-0.5 rounded border transition ${
+                    fontSize === sz
+                      ? 'bg-neutral-900 text-white border-neutral-900'
+                      : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-100'
+                  }`}
+                >
+                  {sz}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2.5 border-l border-neutral-200 pl-4">
+              <span className="text-xs text-neutral-600 font-bold">Giãn dòng:</span>
+              <input
+                id="slider-playground-line-height"
+                type="range"
+                min="0.8"
+                max="3.0"
+                step="0.1"
+                value={lineHeight}
+                onChange={(e) => setLineHeight(parseFloat(e.target.value))}
+                className="accent-neutral-900 w-20 sm:w-28 cursor-pointer"
+              />
+              <span className="text-xs text-neutral-900 font-mono font-bold w-8">{lineHeight.toFixed(1)}</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-neutral-600 font-medium">Dòng (Leading):</span>
-            <input
-              id="slider-playground-line-height"
-              type="range"
-              min="0.8"
-              max="3.0"
-              step="0.1"
-              value={lineHeight}
-              onChange={(e) => setLineHeight(parseFloat(e.target.value))}
-              className="accent-neutral-800 w-24 sm:w-32"
-            />
-            <span className="text-xs text-neutral-700 font-mono font-bold w-8">{lineHeight.toFixed(1)}</span>
+          {/* Alignment & Themes & Height controls */}
+          <div className="flex items-center gap-3 flex-wrap">
+            
+            {/* Text alignment */}
+            <div className="flex items-center bg-white rounded-lg border border-neutral-200 p-0.5">
+              <button
+                onClick={() => setTextAlign('left')}
+                className={`p-1.5 rounded transition ${textAlign === 'left' ? 'bg-neutral-200 text-neutral-950' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Căn trái"
+              >
+                <AlignLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setTextAlign('center')}
+                className={`p-1.5 rounded transition ${textAlign === 'center' ? 'bg-neutral-200 text-neutral-950' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Căn giữa"
+              >
+                <AlignCenter className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setTextAlign('right')}
+                className={`p-1.5 rounded transition ${textAlign === 'right' ? 'bg-neutral-200 text-neutral-950' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Căn phải"
+              >
+                <AlignRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Background Theme Preset */}
+            <div className="flex items-center bg-white rounded-lg border border-neutral-200 p-0.5 text-xs">
+              <button
+                onClick={() => setBgTheme('light')}
+                className={`p-1.5 rounded flex items-center gap-1 ${bgTheme === 'light' ? 'bg-neutral-200 font-bold text-neutral-900' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Nền sáng"
+              >
+                <Sun className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setBgTheme('paper')}
+                className={`p-1.5 rounded flex items-center gap-1 ${bgTheme === 'paper' ? 'bg-[#EADFCB] font-bold text-[#2C2621]' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Nền giấy kem"
+              >
+                <span className="w-3.5 h-3.5 rounded-full bg-[#FAF6EE] border border-amber-300 inline-block" />
+              </button>
+              <button
+                onClick={() => setBgTheme('dark')}
+                className={`p-1.5 rounded flex items-center gap-1 ${bgTheme === 'dark' ? 'bg-neutral-800 text-white font-bold' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Nền tối"
+              >
+                <Moon className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setBgTheme('black')}
+                className={`p-1.5 rounded flex items-center gap-1 ${bgTheme === 'black' ? 'bg-black text-amber-300 font-bold' : 'text-neutral-500 hover:text-neutral-900'}`}
+                title="Tương phản cao"
+              >
+                <span className="w-3.5 h-3.5 rounded-full bg-black border border-neutral-700 inline-block" />
+              </button>
+            </div>
+
+            {/* Box Height Preset */}
+            <div className="flex items-center bg-white rounded-lg border border-neutral-200 p-0.5 text-[11px] font-bold text-neutral-600">
+              <button
+                onClick={() => setBoxHeightMode('medium')}
+                className={`px-2 py-1 rounded transition ${boxHeightMode === 'medium' ? 'bg-neutral-900 text-white' : 'hover:text-neutral-900'}`}
+              >
+                Vừa
+              </button>
+              <button
+                onClick={() => setBoxHeightMode('large')}
+                className={`px-2 py-1 rounded transition ${boxHeightMode === 'large' ? 'bg-neutral-900 text-white' : 'hover:text-neutral-900'}`}
+              >
+                Lớn
+              </button>
+              <button
+                onClick={() => setBoxHeightMode('auto')}
+                className={`px-2 py-1 rounded transition ${boxHeightMode === 'auto' ? 'bg-neutral-900 text-white' : 'hover:text-neutral-900'}`}
+              >
+                Tự co giãn
+              </button>
+            </div>
+
           </div>
         </div>
 
-        {/* Quick Sentences */}
-        <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
-          <span className="text-xs text-neutral-600 font-medium shrink-0">Mẫu:</span>
+        {/* Quick Sample Text Presets */}
+        <div className="flex items-center gap-2 overflow-x-auto pt-2 border-t border-neutral-200/60">
+          <span className="text-xs text-neutral-500 font-bold shrink-0">Mẫu văn bản:</span>
           <button
-            onClick={() => setInputText('Chưng cất rượu nếp thơm lừng hoặc giã giò lụa truyền thống.')}
-            className="text-[10px] bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-medium py-1 px-2 rounded-sm shrink-0"
+            onClick={() => setInputText('Chưng cất rượu nếp thơm lừng hoặc giã giò lụa truyền thống. Đất nước Việt Nam vạn dặm gấm vóc, núi sông hùng vĩ chứa chan nghĩa tình. 1234567890!')}
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
           >
-            Đầy đủ dấu phụ
+            Mẫu câu tiêu chuẩn
           </button>
           <button
-            onClick={() => setInputText('ÁĂÂÈÉÊÌÍÒÓÔƠÙÚƯÝ Đ / áăâèéêìíòóôơùúưý đ')}
-            className="text-[10px] bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-medium py-1 px-2 rounded-sm shrink-0"
+            onClick={() => setInputText('ÁĂÂÈÉÊÌÍÒÓÔƠÙÚƯÝ Đ / áăâèéêìíòóôơùúưý đ\nảẻỉỏủỷ ãẽĩõũỹ ạẹịọụỵ\nầấẩẫậ ằắẳẵặ ềếểễệ ồốổỗộ ờớởỡợ ừứửữự')}
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
           >
-            Bảng Việt hóa
+            Toàn bộ 134 ký tự Việt
           </button>
           <button
-            onClick={() => setInputText('Trăm năm trong cõi người ta, chữ tài chữ mệnh khéo là ghét nhau.')}
-            className="text-[10px] bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-medium py-1 px-2 rounded-sm shrink-0"
+            onClick={() => setInputText('Trăm năm trong cõi người ta, chữ tài chữ mệnh khéo là ghét nhau.\nTrải qua một cuộc bể dâu, những điều trông thấy mà đau đớn lòng.\nLạ gì bỉ sắc tư phong, trời xanh quen thói má hồng đánh ghen.')}
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
           >
-            Truyện Kiều
+            Đoạn văn Truyện Kiều
+          </button>
+          <button
+            onClick={() => setInputText('VIỆT NAM HÙNG CƯỜNG - TỰ DO - HẠNH PHÚC 2026')}
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+          >
+            Tiêu đề In Hoa
+          </button>
+          <button
+            onClick={() => setInputText('AV TA Va To Tr Ch Gi Qu Yo Fo ÁV ÀV ÂV')}
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+          >
+            Kiểm tra Kerning Cặp đôi
           </button>
         </div>
       </div>
 
-      {/* Main interactive area split into input and output */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: Input Textarea */}
-        <div className="space-y-1">
-          <span className="text-xs font-semibold text-neutral-700 block">Văn bản kiểm thử:</span>
+      {/* Live Workspace Layout (Full Width Permanent) */}
+      <div className="space-y-4">
+        
+        {/* Input Area (Full width) */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between items-center">
+            <label className="text-xs font-extrabold text-neutral-800 block">
+              Nhập văn bản kiểm thử:
+            </label>
+            <span className="text-[11px] text-neutral-400 font-mono">
+              {inputText.length} ký tự
+            </span>
+          </div>
           <textarea
             id="playground-input-area"
-            rows={5}
+            rows={2}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Gõ đoạn văn bản kiểm tra độ giãn chữ, khoảng cách và độ cao..."
-            className="w-full text-sm p-4 border border-neutral-200 focus:outline-hidden focus:ring-1 focus:ring-neutral-800 rounded-xl"
+            className="w-full text-sm p-3.5 border border-neutral-200 focus:outline-hidden focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 rounded-xl bg-neutral-50/50 text-neutral-900 font-medium"
           />
         </div>
 
-        {/* Right: Live Font Render */}
-        <div className="space-y-1">
-          <span className="text-xs font-semibold text-neutral-700 block">Khu vực hiển thị thực tế (Kéo góc dưới bên phải để chỉnh chiều cao):</span>
+        {/* Full Width Live View Area */}
+        <div className="space-y-1.5">
+          <div className="flex justify-between items-center">
+            <label className="text-xs font-extrabold text-neutral-950 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              Khu vực hiển thị thực tế (Full Width - Tràn màn hình):
+            </label>
+            <span className="text-[11px] text-neutral-400">
+              (Kéo góc dưới bên phải để mở rộng chiều cao)
+            </span>
+          </div>
+
           <div 
             id="playground-rendering-box"
-            className="w-full h-[122px] min-h-[122px] max-h-[600px] p-4 bg-neutral-50 border border-neutral-200 rounded-xl overflow-y-auto break-words resize-y shadow-inner text-left"
+            className={`w-full ${getHeightStyle()} p-6 border rounded-2xl overflow-y-auto break-words resize-y shadow-inner text-left transition-colors duration-200 ${getThemeClasses()}`}
             style={{
               fontFamily: fontRegistered ? `"${activeFamilyName}", sans-serif` : 'sans-serif',
               fontSize: `${fontSize}px`,
               lineHeight: lineHeight,
-              transition: 'font-size 0.1s ease'
+              transition: 'font-size 0.1s ease, background-color 0.2s ease'
             }}
           >
             {inputText ? renderTextWithKerning() : <span className="text-neutral-400 italic">Nhập chữ để kiểm tra hiển thị...</span>}
           </div>
         </div>
+
       </div>
       
       {!fontRegistered && (
-        <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50/50 p-2.5 border border-amber-100 rounded-lg">
-          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping"></span>
-          <span>Hãy lưu ít nhất 1 ký tự Việt hóa hoặc bấm nút <strong>"Cập nhật & Chạy thử font mới"</strong> phía dưới để xem kết quả chạy thử trực tiếp.</span>
+        <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 p-3 border border-amber-200/80 rounded-xl">
+          <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping shrink-0"></span>
+          <span>Hãy bấm nút <strong>"Cập nhật & Chạy thử font mới"</strong> bên trên để đồng bộ hóa và hiển thị tệp font đã xuất bản.</span>
         </div>
       )}
     </div>
   );
 };
+

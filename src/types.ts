@@ -37,8 +37,10 @@ export interface AutoPositionRules {
   barScale: number;             // Scale of bar for đ/Đ (default: 1.0)
   barOffsetX: number;           // Horizontal tweak for bar (default: 0)
   barOffsetY: number;           // Vertical tweak for bar (default: 0)
-  doubleAccentStyle: 'stacked' | 'side'; // 'stacked' (vertical stack) or 'side' (angled offset)
+  doubleAccentStyle: 'stacked' | 'side' | 'custom'; // 'stacked' (vertical stack), 'side' (angled offset), or 'custom' (custom relative X,Y)
   doubleAccentGap: number;      // Distance between circumflex/breve and accent above (default: 20)
+  doubleAccentCustomX?: number; // Custom relative X offset for double accents (default: 0)
+  doubleAccentCustomY?: number; // Custom relative Y offset for double accents (default: 0)
 }
 
 export interface GlyphOverrideState {

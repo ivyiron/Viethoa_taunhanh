@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as opentype from 'opentype.js';
 import { Sliders, Sparkles, Filter, CheckCircle, ChevronRight, HelpCircle, Info, Move, Settings, Check } from 'lucide-react';
 import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata } from '../types';
-import { VIETNAMESE_RECIPES, composeGlyphPath, ComponentRecipe } from '../utils';
+import { VIETNAMESE_RECIPES, composeGlyphPath, ComponentRecipe, getTrackingFamilyMembers } from '../utils';
 
 const getDiaName = (id: string): string => {
   const names: Record<string, string> = {
@@ -27,6 +27,8 @@ interface AutoCompositeBoardProps {
   rules: AutoPositionRules;
   overrides: Record<string, GlyphOverrideState>;
   onUpdateOverride: (char: string, updated: Partial<GlyphOverrideState>) => void;
+  onBatchUpdateOverrides?: (updater: (prev: Record<string, GlyphOverrideState>) => Record<string, GlyphOverrideState>) => void;
+  preserveExistingGlyphs?: boolean;
 }
 
 // Micro canvas to render a single composite glyph
@@ -40,7 +42,8 @@ const GlyphGridCell: React.FC<{
   override?: GlyphOverrideState;
   isActive: boolean;
   onClick: () => void;
-}> = ({ char, recipe, font, fontMetadata, templates, rules, override, isActive, onClick }) => {
+  preserveExistingGlyphs?: boolean;
+}> = ({ char, recipe, font, fontMetadata, templates, rules, override, isActive, onClick, preserveExistingGlyphs = true }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -49,25 +52,36 @@ const GlyphGridCell: React.FC<{
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // HiDPI Device Pixel Ratio Scaling for micro cell canvas
+    const cssWidth = canvas.clientWidth || 64;
+    const cssHeight = canvas.clientHeight || 48;
+    const dpr = Math.max(2, window.devicePixelRatio || 1);
+
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
     // Clear background
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     try {
       // Compose composite path
-      const { path, advanceWidth } = composeGlyphPath(font, recipe, templates, rules, override);
+      const { path, advanceWidth } = composeGlyphPath(font, recipe, templates, rules, override, preserveExistingGlyphs);
       
-      const width = canvas.width;
-      const height = canvas.height;
-      const padding = 16;
+      const width = cssWidth;
+      const height = cssHeight;
+      const padding = 12;
       const drawHeight = height - padding * 2;
       
-      const scaleFactor = drawHeight / (fontMetadata.ascender - fontMetadata.descender);
+      const scaleFactor = drawHeight / Math.max(1, (fontMetadata.ascender - fontMetadata.descender));
       const centerX = width / 2;
       const fontStartX = centerX - (advanceWidth / 2) * scaleFactor;
       const baselineY = padding + fontMetadata.ascender * scaleFactor;
 
-      // Draw faint baseline & advance lines
-      ctx.strokeStyle = '#f1f5f9';
+      // Draw faint baseline line
+      ctx.strokeStyle = '#e2e8f0';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, baselineY);
@@ -77,7 +91,7 @@ const GlyphGridCell: React.FC<{
       // Render the composite path
       ctx.beginPath();
       ctx.fillStyle = isActive ? '#0f172a' : '#334155';
-      ctx.strokeStyle = isActive ? '#000000' : '#475569';
+      ctx.strokeStyle = isActive ? '#000000' : '#1e293b';
       ctx.lineWidth = 1.2;
 
       path.commands.forEach((cmd) => {
@@ -111,8 +125,18 @@ const GlyphGridCell: React.FC<{
       ctx.fill();
     } catch (err) {
       console.error('Failed to draw grid cell glyph:', char, err);
+    } finally {
+      ctx.restore();
     }
   }, [font, fontMetadata, templates, rules, override, isActive]);
+
+  const isNative = useMemo(() => {
+    if (!font) return false;
+    const idx = font.charToGlyphIndex(char);
+    if (idx <= 0) return false;
+    const g = font.glyphs.get(idx);
+    return !!(g && g.path && g.path.commands && g.path.commands.length > 0);
+  }, [font, char]);
 
   const isCompleted = override?.isCompleted || false;
   const hasOverride = override && (
@@ -135,12 +159,21 @@ const GlyphGridCell: React.FC<{
           ? 'border-neutral-950 bg-neutral-50/50 ring-2 ring-neutral-950/20 shadow-xs'
           : isCompleted
             ? 'border-green-200 bg-green-50/20 hover:border-green-300'
-            : 'border-neutral-200 bg-white hover:bg-neutral-50/80 hover:border-neutral-300'
+            : isNative
+              ? 'border-amber-200/80 bg-amber-50/20 hover:border-amber-300'
+              : 'border-neutral-200 bg-white hover:bg-neutral-50/80 hover:border-neutral-300'
       }`}
     >
       {/* Top markers */}
       <div className="absolute top-1.5 left-1.5 right-1.5 flex justify-between items-center w-auto">
-        <span className="font-sans font-bold text-xs text-neutral-800">{char}</span>
+        <div className="flex items-center gap-1">
+          <span className="font-sans font-bold text-xs text-neutral-800">{char}</span>
+          {isNative && (
+            <span className="text-[8px] font-extrabold px-1 py-0.2 bg-amber-100 text-amber-900 rounded" title="Ký tự đã có sẵn trong font gốc (được bảo toàn không ghi đè)">
+              Gốc
+            </span>
+          )}
+        </div>
         <div className="flex gap-0.5">
           {hasOverride && (
             <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" title="Có cài đặt tinh chỉnh riêng" />
@@ -170,10 +203,12 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
   templates,
   rules,
   overrides,
-  onUpdateOverride
+  onUpdateOverride,
+  onBatchUpdateOverrides,
+  preserveExistingGlyphs = true
 }) => {
   const [selectedChar, setSelectedChar] = useState<string>('á');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'lowercase' | 'uppercase' | 'a_group' | 'e_group' | 'o_group' | 'u_group' | 'edited'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'lowercase' | 'uppercase' | 'a_group' | 'e_group' | 'o_group' | 'u_group' | 'other_group' | 'edited'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const activeRecipe = useMemo(() => {
@@ -188,6 +223,67 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
     scaleY: 1.0,
     advanceWidthTweak: 0,
     isCompleted: false
+  };
+
+  const isGlyphCustomized = (ovr?: GlyphOverrideState): boolean => {
+    if (!ovr) return false;
+    return (
+      ovr.offsetX !== 0 ||
+      ovr.offsetY !== 0 ||
+      ovr.scaleX !== 1.0 ||
+      ovr.scaleY !== 1.0 ||
+      ovr.advanceWidthTweak !== 0 ||
+      (ovr.comp1OffsetX !== undefined && ovr.comp1OffsetX !== 0) ||
+      (ovr.comp1OffsetY !== undefined && ovr.comp1OffsetY !== 0) ||
+      (ovr.comp2OffsetX !== undefined && ovr.comp2OffsetX !== 0) ||
+      (ovr.comp2OffsetY !== undefined && ovr.comp2OffsetY !== 0)
+    );
+  };
+
+  const handleApproveAllCustomized = () => {
+    if (onBatchUpdateOverrides) {
+      onBatchUpdateOverrides((prev) => {
+        const next = { ...prev };
+        VIETNAMESE_RECIPES.forEach((recipe) => {
+          const ovr = next[recipe.char];
+          if (isGlyphCustomized(ovr)) {
+            next[recipe.char] = {
+              ...ovr,
+              isCompleted: true
+            };
+          }
+        });
+        return next;
+      });
+    } else {
+      VIETNAMESE_RECIPES.forEach((recipe) => {
+        const ovr = overrides[recipe.char];
+        if (isGlyphCustomized(ovr)) {
+          onUpdateOverride(recipe.char, { isCompleted: true });
+        }
+      });
+    }
+  };
+
+  const handleApproveAll = () => {
+    if (onBatchUpdateOverrides) {
+      onBatchUpdateOverrides((prev) => {
+        const next = { ...prev };
+        VIETNAMESE_RECIPES.forEach((recipe) => {
+          const ovr = next[recipe.char] || {
+            char: recipe.char,
+            offsetX: 0,
+            offsetY: 0,
+            scaleX: 1.0,
+            scaleY: 1.0,
+            advanceWidthTweak: 0,
+            isCompleted: false
+          };
+          next[recipe.char] = { ...ovr, isCompleted: true };
+        });
+        return next;
+      });
+    }
   };
 
   // Filter recipes based on tab and query
@@ -220,20 +316,12 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
       if (activeFilter === 'u_group') {
         return ['u', 'U', 'ư', 'Ư'].includes(recipe.baseChar);
       }
+      if (activeFilter === 'other_group') {
+        return ['i', 'I', 'y', 'Y', 'd', 'D'].includes(recipe.baseChar) || ['i', 'I', 'y', 'Y', 'd', 'D', 'đ', 'Đ'].includes(recipe.char);
+      }
       if (activeFilter === 'edited') {
         const ovr = overrides[recipe.char];
-        return ovr && (
-          ovr.offsetX !== 0 ||
-          ovr.offsetY !== 0 ||
-          ovr.scaleX !== 1.0 ||
-          ovr.scaleY !== 1.0 ||
-          ovr.advanceWidthTweak !== 0 ||
-          (ovr.comp1OffsetX !== undefined && ovr.comp1OffsetX !== 0) ||
-          (ovr.comp1OffsetY !== undefined && ovr.comp1OffsetY !== 0) ||
-          (ovr.comp2OffsetX !== undefined && ovr.comp2OffsetX !== 0) ||
-          (ovr.comp2OffsetY !== undefined && ovr.comp2OffsetY !== 0) ||
-          ovr.isCompleted
-        );
+        return isGlyphCustomized(ovr) || !!ovr?.isCompleted;
       }
       return true; // 'all'
     });
@@ -247,17 +335,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
     VIETNAMESE_RECIPES.forEach((r) => {
       const ovr = overrides[r.char];
       if (ovr?.isCompleted) completed++;
-      if (ovr && (
-        ovr.offsetX !== 0 ||
-        ovr.offsetY !== 0 ||
-        ovr.scaleX !== 1.0 ||
-        ovr.scaleY !== 1.0 ||
-        ovr.advanceWidthTweak !== 0 ||
-        (ovr.comp1OffsetX !== undefined && ovr.comp1OffsetX !== 0) ||
-        (ovr.comp1OffsetY !== undefined && ovr.comp1OffsetY !== 0) ||
-        (ovr.comp2OffsetX !== undefined && ovr.comp2OffsetX !== 0) ||
-        (ovr.comp2OffsetY !== undefined && ovr.comp2OffsetY !== 0)
-      )) customized++;
+      if (isGlyphCustomized(ovr)) customized++;
     });
 
     return { total, completed, customized };
@@ -265,54 +343,121 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
 
   // Big Inspector preview drawing logic
   const inspectorCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Resize listener for inspector canvas
+  const [inspectorResizeCounter, setInspectorResizeCounter] = useState(0);
+  useEffect(() => {
+    const handleResize = () => setInspectorResizeCounter(c => c + 1);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   useEffect(() => {
     const canvas = inspectorCanvasRef.current;
     if (!canvas || !activeRecipe) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // HiDPI Scaling
+    const cssWidth = canvas.clientWidth || 500;
+    const cssHeight = canvas.clientHeight || 375;
+    const dpr = Math.max(2, window.devicePixelRatio || 1);
+
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     try {
-      const { path, advanceWidth } = composeGlyphPath(font, activeRecipe, templates, rules, activeOverride);
+      const { path, advanceWidth } = composeGlyphPath(font, activeRecipe, templates, rules, activeOverride, preserveExistingGlyphs);
       
-      const width = canvas.width;
-      const height = canvas.height;
-      const padding = 40;
+      const width = cssWidth;
+      const height = cssHeight;
+      const padding = 35;
       const drawHeight = height - padding * 2;
-      const scaleFactor = drawHeight / (fontMetadata.ascender - fontMetadata.descender);
+      const scaleFactor = drawHeight / Math.max(1, (fontMetadata.ascender - fontMetadata.descender));
       const centerX = width / 2;
       const fontStartX = centerX - (advanceWidth / 2) * scaleFactor;
       const baselineY = padding + fontMetadata.ascender * scaleFactor;
 
-      // Draw background grids
-      ctx.fillStyle = '#fcfcfc';
+      // Draw background mesh/dots
+      ctx.fillStyle = '#fafafa';
       ctx.fillRect(0, 0, width, height);
 
-      // Baseline guide
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(10, baselineY);
-      ctx.lineTo(width - 10, baselineY);
-      ctx.stroke();
+      ctx.fillStyle = '#cbd5e1';
+      for (let x = 15; x < width; x += 25) {
+        for (let y = 15; y < height; y += 25) {
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
 
-      // Side bearings
-      ctx.strokeStyle = '#93c5fd';
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(fontStartX, 10);
-      ctx.lineTo(fontStartX, height - 10);
-      ctx.moveTo(fontStartX + advanceWidth * scaleFactor, 10);
-      ctx.lineTo(fontStartX + advanceWidth * scaleFactor, height - 10);
-      ctx.stroke();
+      // Horizontal guidelines helper
+      const drawGuideLine = (yVal: number, label: string, color: string, isDashed = true, isBaseline = false) => {
+        const yCanvas = baselineY - yVal * scaleFactor;
+        ctx.beginPath();
+        if (isDashed) ctx.setLineDash([4, 4]);
+        else ctx.setLineDash([]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isBaseline ? 1.5 : 1;
+        ctx.moveTo(10, yCanvas);
+        ctx.lineTo(width - 10, yCanvas);
+        ctx.stroke();
 
-      // Render Glyph
+        ctx.font = 'bold 10px sans-serif';
+        const labelText = `${label} (${Math.round(yVal)})`;
+        const textWidth = ctx.measureText(labelText).width;
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.fillRect(12, yCanvas - 13, textWidth + 8, 14);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(12, yCanvas - 13, textWidth + 8, 14);
+
+        ctx.fillStyle = color;
+        ctx.fillText(labelText, 16, yCanvas - 2);
+      };
+
+      drawGuideLine(fontMetadata.ascender, 'Ascender', '#ef4444', true);
+      drawGuideLine(fontMetadata.capHeight, 'Cap Height', '#ea580c', true);
+      drawGuideLine(fontMetadata.xHeight, 'x-Height', '#a855f7', true);
+      drawGuideLine(0, 'Baseline', '#2563eb', false, true);
+      drawGuideLine(fontMetadata.descender, 'Descender', '#ef4444', true);
+
+      // Side bearings (LSB / RSB)
+      const drawVerticalGuide = (xVal: number, label: string, color: string) => {
+        const xCanvas = fontStartX + xVal * scaleFactor;
+        ctx.beginPath();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.moveTo(xCanvas, 15);
+        ctx.lineTo(xCanvas, height - 15);
+        ctx.stroke();
+
+        const labelText = `${label} (${Math.round(xVal)})`;
+        ctx.font = 'bold 10px sans-serif';
+        const textWidth = ctx.measureText(labelText).width;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.fillRect(xCanvas + 2, height - 22, textWidth + 8, 14);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(xCanvas + 2, height - 22, textWidth + 8, 14);
+
+        ctx.fillStyle = color;
+        ctx.fillText(labelText, xCanvas + 6, height - 11);
+      };
+
+      drawVerticalGuide(0, 'LSB', '#0284c7');
+      drawVerticalGuide(advanceWidth, 'RSB', '#0284c7');
+
+      // Render Glyph Path
       ctx.beginPath();
       ctx.setLineDash([]);
-      ctx.fillStyle = '#1e293b';
-      ctx.strokeStyle = '#0f172a';
+      ctx.fillStyle = '#0f172a';
+      ctx.strokeStyle = '#020617';
       ctx.lineWidth = 1.5;
 
       path.commands.forEach((cmd) => {
@@ -348,8 +493,10 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
 
     } catch (err) {
       console.error('Inspector render failed', err);
+    } finally {
+      ctx.restore();
     }
-  }, [font, fontMetadata, templates, rules, activeRecipe, activeOverride]);
+  }, [font, fontMetadata, templates, rules, activeRecipe, activeOverride, inspectorResizeCounter]);
 
   return (
     <div id="auto-composite-board-panel" className="space-y-6">
@@ -367,6 +514,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
             { id: 'e_group', label: 'Nhóm chữ E/Ê' },
             { id: 'o_group', label: 'Nhóm chữ O/Ô/Ơ' },
             { id: 'u_group', label: 'Nhóm chữ U/Ư' },
+            { id: 'other_group', label: 'Các ký tự khác' },
             { id: 'edited', label: 'Có tinh chỉnh' }
           ].map((tab) => (
             <button
@@ -408,13 +556,23 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
         
         {/* Left Area: Grid of 134 glyphs (8 columns) */}
         <div className="lg:col-span-8 space-y-4">
-          <div className="flex justify-between items-center px-1">
+          <div className="flex flex-wrap justify-between items-center px-1 gap-2">
             <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block">
               Kết Quả Tự Động Hóa ({filteredRecipes.length} chữ hiển thị)
             </span>
-            <div className="text-[10px] font-mono text-neutral-500 flex gap-4">
-              <span>Hoàn thành: <strong>{stats.completed}/{stats.total}</strong></span>
-              <span>Đã override: <strong>{stats.customized}</strong></span>
+            <div className="flex items-center gap-3">
+              <div className="text-[10px] font-mono text-neutral-500 flex gap-3">
+                <span>Hoàn thành: <strong className="text-emerald-700 font-bold">{stats.completed}/{stats.total}</strong></span>
+                <span>Đã tinh chỉnh: <strong className="text-indigo-700 font-bold">{stats.customized}</strong></span>
+              </div>
+              <button
+                onClick={handleApproveAllCustomized}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="Duyệt tất cả các ký tự đã được tinh chỉnh"
+              >
+                <CheckCircle className="w-3.5 h-3.5 fill-white text-emerald-600" />
+                <span>Duyệt tất cả đã tinh chỉnh ({stats.customized})</span>
+              </button>
             </div>
           </div>
 
@@ -425,7 +583,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
               <p className="text-xs text-neutral-400 mt-1">Hãy thử đổi bộ lọc hoặc gõ từ khóa tìm kiếm khác.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 xl:grid-cols-7 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3">
               {filteredRecipes.map((recipe) => (
                 <GlyphGridCell
                   key={recipe.char}
@@ -438,6 +596,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                   override={overrides[recipe.char]}
                   isActive={selectedChar === recipe.char}
                   onClick={() => setSelectedChar(recipe.char)}
+                  preserveExistingGlyphs={preserveExistingGlyphs}
                 />
               ))}
             </div>
@@ -455,11 +614,11 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                 Bộ Tinh Chỉnh Riêng
               </h4>
               <p className="text-[11px] text-neutral-400 mt-0.5">
-                Ghi đè thủ công cho chữ <strong className="text-neutral-900 font-bold">"{selectedChar}"</strong>
+                Đang chọn chữ <strong className="text-neutral-900 font-bold">"{selectedChar}"</strong>
               </p>
             </div>
 
-            {/* Quick Completion checkbox */}
+            {/* Single glyph quick toggle */}
             <button
               onClick={() => onUpdateOverride(selectedChar, { isCompleted: !activeOverride.isCompleted })}
               className={`p-1.5 rounded-lg border flex items-center gap-1 text-[10px] font-bold transition ${
@@ -467,6 +626,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                   ? 'bg-green-50 border-green-200 text-green-700'
                   : 'bg-white border-neutral-200 hover:bg-neutral-50 text-neutral-600'
               }`}
+              title="Duyệt hoặc bỏ duyệt riêng cho ký tự đang chọn"
             >
               <CheckCircle className={`w-3.5 h-3.5 ${activeOverride.isCompleted ? 'fill-green-600 text-white' : ''}`} />
               <span>{activeOverride.isCompleted ? 'Đã duyệt' : 'Duyệt'}</span>
@@ -518,8 +678,9 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                 onChange={(e) => onUpdateOverride(selectedChar, { advanceWidthTweak: parseInt(e.target.value) })}
                 className="w-full accent-indigo-600 cursor-pointer"
               />
-              <p className="text-[9px] text-indigo-600/80 leading-snug">
-                * Kéo sang phải để tăng khoảng đệm phải (tracking). Thích hợp tinh chỉnh sườn phải cho các ký tự <strong>ư, ơ, đ, Ư, Ơ, Đ</strong>.
+              <p className="text-[9px] text-indigo-600/90 leading-snug">
+                * Thay đổi tracking sẽ <strong>tự động đồng bộ</strong> cho cả bộ chữ liên quan:{' '}
+                <span className="font-bold underline">{getTrackingFamilyMembers(selectedChar).join(', ')}</span>.
               </p>
             </div>
 

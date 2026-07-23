@@ -59,6 +59,48 @@ export const VIETNAMESE_BASE_MAP: Record<string, string> = {
   'đ': 'd', 'Đ': 'D'
 };
 
+// Character family groups for tracking/advance width synchronization
+export const TRACKING_FAMILIES: string[][] = [
+  // Lowercase
+  ['a', 'à', 'á', 'ả', 'ã', 'ạ'],
+  ['ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ'],
+  ['â', 'ầ', 'ấ', 'ẩ', 'ẫ', 'ậ'],
+  ['e', 'è', 'é', 'ẻ', 'ẽ', 'ẹ'],
+  ['ê', 'ề', 'ế', 'ể', 'ễ', 'ệ'],
+  ['i', 'ì', 'í', 'ỉ', 'ĩ', 'ị'],
+  ['o', 'ò', 'ó', 'ỏ', 'õ', 'ọ'],
+  ['ô', 'ồ', 'ố', 'ổ', 'ỗ', 'ộ'],
+  ['ơ', 'ờ', 'ớ', 'ở', 'ỡ', 'ợ'],
+  ['u', 'ù', 'ú', 'ủ', 'ũ', 'ụ'],
+  ['ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự'],
+  ['y', 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ'],
+  ['d', 'đ'],
+
+  // Uppercase
+  ['A', 'À', 'Á', 'Ả', 'Ã', 'Ạ'],
+  ['Ă', 'Ằ', 'Ắ', 'Ẳ', 'Ẵ', 'Ặ'],
+  ['Â', 'Ầ', 'Ấ', 'Ẩ', 'Ẫ', 'Ậ'],
+  ['E', 'È', 'É', 'Ẻ', 'Ẽ', 'Ẹ'],
+  ['Ê', 'Ề', 'Ế', 'Ể', 'Ễ', 'Ệ'],
+  ['I', 'Ì', 'Í', 'Ỉ', 'Ĩ', 'Ị'],
+  ['O', 'Ò', 'Ó', 'Ỏ', 'Õ', 'Ọ'],
+  ['Ô', 'Ồ', 'Ố', 'Ổ', 'Ỗ', 'Ộ'],
+  ['Ơ', 'Ờ', 'Ớ', 'Ở', 'Ỡ', 'Ợ'],
+  ['U', 'Ù', 'Ú', 'Ủ', 'Ũ', 'Ụ'],
+  ['Ư', 'Ừ', 'Ứ', 'Ử', 'Ữ', 'Ự'],
+  ['Y', 'Ỳ', 'Ý', 'Ỷ', 'Ỹ', 'Ỵ'],
+  ['D', 'Đ']
+];
+
+export function getTrackingFamilyMembers(char: string): string[] {
+  for (const family of TRACKING_FAMILIES) {
+    if (family.includes(char)) {
+      return family;
+    }
+  }
+  return [char];
+}
+
 // Human-readable names for characters to make alignment/editing crystal clear
 export const CHARACTER_DESCRIPTIONS: Record<string, string> = {
   'à': 'a huyền', 'á': 'a sắc', 'ả': 'a hỏi', 'ã': 'a ngã', 'ạ': 'a nặng',
@@ -1127,7 +1169,9 @@ export const DEFAULT_AUTO_RULES: AutoPositionRules = {
   barOffsetX: 0,
   barOffsetY: 0,
   doubleAccentStyle: 'stacked',
-  doubleAccentGap: 20
+  doubleAccentGap: 20,
+  doubleAccentCustomX: 0,
+  doubleAccentCustomY: 0
 };
 
 export interface ComponentRecipe {
@@ -1274,14 +1318,24 @@ export function calculateAutoPosition(
     offsetX = baseXCenter - (diaXCenter * scaleX);
 
     if (previousPlacedBox) {
-      // Placing on top of another diacritic (Stacked vs Side-by-side)
+      // Placing on top of another diacritic (Stacked vs Side-by-side vs Custom)
+      const customX = rules.doubleAccentCustomX ?? 0;
+      const customY = rules.doubleAccentCustomY ?? 0;
+
       if (rules.doubleAccentStyle === 'stacked') {
         const targetTopY = previousPlacedBox.yMax;
-        offsetY = targetTopY - (diaBBox.yMin * scaleY) + rules.doubleAccentGap;
-      } else {
+        offsetY = targetTopY - (diaBBox.yMin * scaleY) + rules.doubleAccentGap + customY;
+        offsetX = offsetX + customX;
+      } else if (rules.doubleAccentStyle === 'side') {
         // Angled/Side placement (very popular in high-end Vietnamese type design)
-        offsetX = (previousPlacedBox.xMax - 10) - (diaBBox.xMin * scaleX);
-        offsetY = previousPlacedBox.yMax - (diaBBox.yMax * scaleY) + 5;
+        offsetX = (previousPlacedBox.xMax - 10) - (diaBBox.xMin * scaleX) + customX;
+        offsetY = previousPlacedBox.yMax - (diaBBox.yMax * scaleY) + 5 + customY;
+      } else {
+        // 'custom' mode: freely position relative to previous accent's center top
+        const prevCenterX = (previousPlacedBox.xMin + previousPlacedBox.xMax) / 2;
+        const targetTopY = previousPlacedBox.yMax;
+        offsetX = prevCenterX - (diaXCenter * scaleX) + customX;
+        offsetY = targetTopY - (diaBBox.yMin * scaleY) + rules.doubleAccentGap + customY;
       }
     } else {
       const gap = isCapital ? rules.uppercaseAccentGap : rules.lowercaseAccentGap;
@@ -1293,23 +1347,199 @@ export function calculateAutoPosition(
 }
 
 /**
+ * Mapping of double-accented or compound Vietnamese characters to their existing precomposed base character
+ * and the remaining secondary diacritic mark to add on top/bottom.
+ * E.g., 'ấ' -> precomposed base 'â' + remaining mark 'acute'.
+ */
+export const PRECOMPOSED_BASE_MAP: Record<string, { precomposedBaseChar: string; remainingComponent: string }> = {
+  // â (a-circumflex) group
+  'ầ': { precomposedBaseChar: 'â', remainingComponent: 'grave' },
+  'ấ': { precomposedBaseChar: 'â', remainingComponent: 'acute' },
+  'ẩ': { precomposedBaseChar: 'â', remainingComponent: 'hook' },
+  'ẫ': { precomposedBaseChar: 'â', remainingComponent: 'tilde' },
+  'ậ': { precomposedBaseChar: 'â', remainingComponent: 'dot_below' },
+
+  // Â (A-circumflex) group
+  'Ầ': { precomposedBaseChar: 'Â', remainingComponent: 'grave' },
+  'Ấ': { precomposedBaseChar: 'Â', remainingComponent: 'acute' },
+  'Ẩ': { precomposedBaseChar: 'Â', remainingComponent: 'hook' },
+  'Ẫ': { precomposedBaseChar: 'Â', remainingComponent: 'tilde' },
+  'Ậ': { precomposedBaseChar: 'Â', remainingComponent: 'dot_below' },
+
+  // ă (a-breve) group
+  'ằ': { precomposedBaseChar: 'ă', remainingComponent: 'grave' },
+  'ắ': { precomposedBaseChar: 'ă', remainingComponent: 'acute' },
+  'ẳ': { precomposedBaseChar: 'ă', remainingComponent: 'hook' },
+  'ẵ': { precomposedBaseChar: 'ă', remainingComponent: 'tilde' },
+  'ặ': { precomposedBaseChar: 'ă', remainingComponent: 'dot_below' },
+
+  // Ă (A-breve) group
+  'Ằ': { precomposedBaseChar: 'Ă', remainingComponent: 'grave' },
+  'Ắ': { precomposedBaseChar: 'Ă', remainingComponent: 'acute' },
+  'Ẳ': { precomposedBaseChar: 'Ă', remainingComponent: 'hook' },
+  'Ẵ': { precomposedBaseChar: 'Ă', remainingComponent: 'tilde' },
+  'Ặ': { precomposedBaseChar: 'Ă', remainingComponent: 'dot_below' },
+
+  // ê (e-circumflex) group
+  'ề': { precomposedBaseChar: 'ê', remainingComponent: 'grave' },
+  'ế': { precomposedBaseChar: 'ê', remainingComponent: 'acute' },
+  'ể': { precomposedBaseChar: 'ê', remainingComponent: 'hook' },
+  'ễ': { precomposedBaseChar: 'ê', remainingComponent: 'tilde' },
+  'ệ': { precomposedBaseChar: 'ê', remainingComponent: 'dot_below' },
+
+  // Ê (E-circumflex) group
+  'Ề': { precomposedBaseChar: 'Ê', remainingComponent: 'grave' },
+  'Ế': { precomposedBaseChar: 'Ê', remainingComponent: 'acute' },
+  'Ể': { precomposedBaseChar: 'Ê', remainingComponent: 'hook' },
+  'Ễ': { precomposedBaseChar: 'Ê', remainingComponent: 'tilde' },
+  'Ệ': { precomposedBaseChar: 'Ê', remainingComponent: 'dot_below' },
+
+  // ô (o-circumflex) group
+  'ồ': { precomposedBaseChar: 'ô', remainingComponent: 'grave' },
+  'ố': { precomposedBaseChar: 'ô', remainingComponent: 'acute' },
+  'ổ': { precomposedBaseChar: 'ô', remainingComponent: 'hook' },
+  'ỗ': { precomposedBaseChar: 'ô', remainingComponent: 'tilde' },
+  'ộ': { precomposedBaseChar: 'ô', remainingComponent: 'dot_below' },
+
+  // Ô (O-circumflex) group
+  'Ồ': { precomposedBaseChar: 'Ô', remainingComponent: 'grave' },
+  'Ố': { precomposedBaseChar: 'Ô', remainingComponent: 'acute' },
+  'Ổ': { precomposedBaseChar: 'Ô', remainingComponent: 'hook' },
+  'Ỗ': { precomposedBaseChar: 'Ô', remainingComponent: 'tilde' },
+  'Ộ': { precomposedBaseChar: 'Ô', remainingComponent: 'dot_below' },
+
+  // ơ (o-horn) group
+  'ờ': { precomposedBaseChar: 'ơ', remainingComponent: 'grave' },
+  'ớ': { precomposedBaseChar: 'ơ', remainingComponent: 'acute' },
+  'ở': { precomposedBaseChar: 'ơ', remainingComponent: 'hook' },
+  'ỡ': { precomposedBaseChar: 'ơ', remainingComponent: 'tilde' },
+  'ợ': { precomposedBaseChar: 'ơ', remainingComponent: 'dot_below' },
+
+  // Ơ (O-horn) group
+  'Ờ': { precomposedBaseChar: 'Ơ', remainingComponent: 'grave' },
+  'Ớ': { precomposedBaseChar: 'Ơ', remainingComponent: 'acute' },
+  'Ở': { precomposedBaseChar: 'Ơ', remainingComponent: 'hook' },
+  'Ỡ': { precomposedBaseChar: 'Ơ', remainingComponent: 'tilde' },
+  'Ợ': { precomposedBaseChar: 'Ơ', remainingComponent: 'dot_below' },
+
+  // ư (u-horn) group
+  'ừ': { precomposedBaseChar: 'ư', remainingComponent: 'grave' },
+  'ứ': { precomposedBaseChar: 'ư', remainingComponent: 'acute' },
+  'ử': { precomposedBaseChar: 'ư', remainingComponent: 'hook' },
+  'ữ': { precomposedBaseChar: 'ư', remainingComponent: 'tilde' },
+  'ự': { precomposedBaseChar: 'ư', remainingComponent: 'dot_below' },
+
+  // Ư (U-horn) group
+  'Ừ': { precomposedBaseChar: 'Ư', remainingComponent: 'grave' },
+  'Ứ': { precomposedBaseChar: 'Ư', remainingComponent: 'acute' },
+  'Ử': { precomposedBaseChar: 'Ư', remainingComponent: 'hook' },
+  'Ữ': { precomposedBaseChar: 'Ư', remainingComponent: 'tilde' },
+  'Ự': { precomposedBaseChar: 'Ư', remainingComponent: 'dot_below' }
+};
+
+/**
  * Builds a composite path for a character by merging the base glyph and its required diacritics.
+ * When preserveExistingGlyphs is enabled and a precomposed base character (e.g., 'â', 'ô', 'ă') exists in the font,
+ * it uses that precomposed glyph directly as the base character to inherit its native circumflex/breve mark.
  */
 export function composeGlyphPath(
   font: opentype.Font,
   recipe: ComponentRecipe,
   templates: Record<string, DiacriticTemplate>,
   rules: AutoPositionRules,
-  overrides?: GlyphOverrideState
+  overrides?: GlyphOverrideState,
+  preserveExistingGlyphs: boolean = true
 ): { 
   path: opentype.Path; 
   advanceWidth: number; 
   hornInfo?: { yMin: number; yMax: number; excessRight: number } 
 } {
-  let baseGlyph = font.charToGlyph(recipe.baseChar);
+  let baseCharToUse = recipe.baseChar;
+  let componentsToUse = [...recipe.components];
+
+  const hasUserOverrides = overrides && (
+    (overrides.offsetX !== undefined && overrides.offsetX !== 0) ||
+    (overrides.offsetY !== undefined && overrides.offsetY !== 0) ||
+    (overrides.scaleX !== undefined && overrides.scaleX !== 1.0) ||
+    (overrides.scaleY !== undefined && overrides.scaleY !== 1.0) ||
+    overrides.comp1OffsetX !== undefined ||
+    overrides.comp1OffsetY !== undefined ||
+    overrides.comp2OffsetX !== undefined ||
+    overrides.comp2OffsetY !== undefined
+  );
+
+  // If preserveExistingGlyphs is enabled and the target character itself is available in the font (and no manual override exists),
+  // use the native precomposed glyph directly from the font.
+  if (preserveExistingGlyphs && font && !hasUserOverrides) {
+    const existingIdx = font.charToGlyphIndex(recipe.char);
+    if (existingIdx > 0) {
+      const existingGlyph = font.glyphs.get(existingIdx);
+      if (existingGlyph && existingGlyph.path && existingGlyph.path.commands && existingGlyph.path.commands.length > 0) {
+        return {
+          path: existingGlyph.path,
+          advanceWidth: existingGlyph.advanceWidth || 500
+        };
+      }
+    }
+  }
+
+  // If preserveExistingGlyphs is enabled, check if a precomposed base character (like 'â', 'ô', 'ă', 'ê', 'ơ', 'ư')
+  // is available in the font. Using it as the base glyph preserves the font's native circumflex/breve/horn.
+  let precomposedFirstAccentBox: { xMin: number; yMin: number; xMax: number; yMax: number } | undefined = undefined;
+
+  if (preserveExistingGlyphs && font) {
+    const preInfo = PRECOMPOSED_BASE_MAP[recipe.char];
+    if (preInfo) {
+      const preIdx = font.charToGlyphIndex(preInfo.precomposedBaseChar);
+      if (preIdx > 0) {
+        const preGlyph = font.glyphs.get(preIdx);
+        if (preGlyph && preGlyph.path && preGlyph.path.commands && preGlyph.path.commands.length > 0) {
+          baseCharToUse = preInfo.precomposedBaseChar;
+          componentsToUse = [preInfo.remainingComponent];
+
+          // For top-accent precomposed bases ('â', 'Â', 'ă', 'Ă', 'ê', 'Ê', 'ô', 'Ô'),
+          // extract the native top mark's bounding box so double accent rules ('stacked', 'side', 'custom') apply seamlessly!
+          const preCharLower = preInfo.precomposedBaseChar.toLowerCase();
+          if (['â', 'ă', 'ê', 'ô'].includes(preCharLower)) {
+            const unaccentedBaseChar = recipe.baseChar;
+            const unaccentedGlyph = font.charToGlyph(unaccentedBaseChar);
+            let unaccentedTopY = font.tables?.os2?.sTypoXHeight || 500;
+            if (unaccentedGlyph && unaccentedGlyph.path && unaccentedGlyph.path.commands && unaccentedGlyph.path.commands.length > 0) {
+              const uBox = unaccentedGlyph.getBoundingBox();
+              unaccentedTopY = uBox.y2;
+            }
+
+            const contours = getGlyphContours(preGlyph.path.commands);
+            const topMarkCmds: any[] = [];
+            for (const contour of contours) {
+              const cBox = getExactBoundingBox(contour);
+              if (cBox.yMin >= unaccentedTopY - 30) {
+                topMarkCmds.push(...contour);
+              }
+            }
+
+            if (topMarkCmds.length > 0) {
+              precomposedFirstAccentBox = getExactBoundingBox(topMarkCmds);
+            } else {
+              const pBox = preGlyph.getBoundingBox();
+              const pHeight = pBox.y2 - pBox.y1;
+              precomposedFirstAccentBox = {
+                xMin: pBox.x1,
+                xMax: pBox.x2,
+                yMin: pBox.y2 - pHeight * 0.35,
+                yMax: pBox.y2
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  let baseGlyph = font.charToGlyph(baseCharToUse);
   
   // For lowercase 'i', when combining with any diacritics, use the dotless 'i' glyph to remove the original dot
-  if (recipe.baseChar === 'i' && recipe.components.length > 0) {
+  if (baseCharToUse === 'i' && componentsToUse.length > 0) {
     const dotlessGlyph = font.charToGlyph('ı');
     if (dotlessGlyph && dotlessGlyph.index > 0 && dotlessGlyph.name !== '.notdef') {
       baseGlyph = dotlessGlyph;
@@ -1335,13 +1565,13 @@ export function composeGlyphPath(
   
   // Get base commands and programmatically strip dot if it's 'i' to guarantee dotless output
   let baseCmds = baseGlyph.path.commands;
-  if (recipe.baseChar === 'i' && recipe.components.length > 0) {
+  if (baseCharToUse === 'i' && componentsToUse.length > 0) {
     baseCmds = removeDotFromICommands(baseCmds);
   }
 
   // Recalculate bounding box based on actual dotless commands if we stripped it
   const baseBBox = baseGlyph.getBoundingBox();
-  if (recipe.baseChar === 'i' && recipe.components.length > 0) {
+  if (baseCharToUse === 'i' && componentsToUse.length > 0) {
     const tightBox = getExactBoundingBox(baseCmds);
     baseBBox.x1 = tightBox.xMin;
     baseBBox.y1 = tightBox.yMin;
@@ -1366,7 +1596,7 @@ export function composeGlyphPath(
   let autoHornAdvanceWidthTweak = 0;
   let hornInfo: { yMin: number; yMax: number; excessRight: number } | undefined = undefined;
 
-  recipe.components.forEach((diaId, idx) => {
+  componentsToUse.forEach((diaId, idx) => {
     const template = templates[diaId];
     if (!template) return;
 
@@ -1381,7 +1611,7 @@ export function composeGlyphPath(
     const diaRawCmds = parseSvgPath(svgPathToUse);
     if (diaRawCmds.length === 0) return;
 
-    // Apply template scale first (Do NOT apply offsets here as they will be added after auto-positioning)
+    // Apply template scale first
     const templateTransformed = transformCommands(
       diaRawCmds,
       scaleXToUse,
@@ -1394,7 +1624,8 @@ export function composeGlyphPath(
     const diaBBox = getExactBoundingBox(templateTransformed);
     
     // Auto align the diacritic based on the bounding boxes
-    const autoPos = calculateAutoPosition(diaId, baseBBox, diaBBox, rules, isCapital, previousBox);
+    const prevBoxToPass = idx === 0 ? precomposedFirstAccentBox : previousBox;
+    const autoPos = calculateAutoPosition(diaId, baseBBox, diaBBox, rules, isCapital, prevBoxToPass);
 
     // Apply template offsets and individual character override tweaks if present
     let finalScaleX = autoPos.scaleX;
@@ -1416,13 +1647,22 @@ export function composeGlyphPath(
       finalOffsetX += oOffsetX;
       finalOffsetY += oOffsetY;
 
-      // Component-specific offsets (comp1 for first, comp2 for second)
+      // Component-specific offsets
       if (idx === 0) {
         if (overrides.comp1OffsetX !== undefined && !isNaN(overrides.comp1OffsetX)) {
           finalOffsetX += overrides.comp1OffsetX;
         }
         if (overrides.comp1OffsetY !== undefined && !isNaN(overrides.comp1OffsetY)) {
           finalOffsetY += overrides.comp1OffsetY;
+        }
+        // If we switched to precomposed base, the single remaining component corresponds to the 2nd component in the original recipe
+        if (recipe.components.length === 2) {
+          if (overrides.comp2OffsetX !== undefined && !isNaN(overrides.comp2OffsetX)) {
+            finalOffsetX += overrides.comp2OffsetX;
+          }
+          if (overrides.comp2OffsetY !== undefined && !isNaN(overrides.comp2OffsetY)) {
+            finalOffsetY += overrides.comp2OffsetY;
+          }
         }
       } else if (idx === 1) {
         if (overrides.comp2OffsetX !== undefined && !isNaN(overrides.comp2OffsetX)) {
@@ -1453,9 +1693,13 @@ export function composeGlyphPath(
       else if (cmd.type === 'Z') compositePath.closePath();
     });
 
-    // Update previous bounding box to handle stacked double accents
+    // Update previous bounding box to handle stacked double accents (only for circumflex & breve)
     const composedDiaBBox = getExactBoundingBox(finalCmds);
-    previousBox = composedDiaBBox;
+    if (diaId === 'circumflex' || diaId === 'breve') {
+      previousBox = composedDiaBBox;
+    } else {
+      previousBox = undefined;
+    }
 
     if (diaId === 'horn_o' || diaId === 'horn_u' || diaId.startsWith('horn')) {
       const excessRight = composedDiaBBox.xMax - baseBBox.x2;
@@ -1488,6 +1732,12 @@ export function composeGlyphPath(
  */
 export function findCandidateGlyph(font: any, diaId: string): any {
   if (!font) return null;
+
+  // 1. Try extracting diacritic shape directly from existing precomposed Vietnamese characters in the font (e.g. 'â', 'ô', 'ă', etc.)
+  const extractedGlyph = extractDiacriticFromComposedGlyph(font, diaId);
+  if (extractedGlyph) {
+    return extractedGlyph;
+  }
 
   const searchConfig: Record<string, { unicodes: number[]; names: string[] }> = {
     grave: {
@@ -1535,7 +1785,7 @@ export function findCandidateGlyph(font: any, diaId: string): any {
   const config = searchConfig[diaId];
   if (!config) return null;
 
-  // 1. Try search by character codes in the font mapping
+  // 2. Try search by character codes in the font mapping
   for (const unicode of config.unicodes) {
     try {
       const charStr = String.fromCharCode(unicode);
@@ -1551,7 +1801,7 @@ export function findCandidateGlyph(font: any, diaId: string): any {
     }
   }
 
-  // 2. Scan font glyph names sequentially
+  // 3. Scan font glyph names sequentially
   if (font.glyphs && font.glyphs.length > 0) {
     for (let i = 0; i < font.glyphs.length; i++) {
       try {
@@ -1567,6 +1817,325 @@ export function findCandidateGlyph(font: any, diaId: string): any {
       } catch (e) {
         // Ignored
       }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Splits path commands into separate closed/open contours (grouped by MoveTo commands).
+ */
+export function getGlyphContours(commands: any[]): any[][] {
+  const contours: any[][] = [];
+  let currentContour: any[] = [];
+
+  for (const cmd of commands) {
+    if (cmd.type === 'M' && currentContour.length > 0) {
+      contours.push(currentContour);
+      currentContour = [];
+    }
+    currentContour.push(cmd);
+  }
+  if (currentContour.length > 0) {
+    contours.push(currentContour);
+  }
+  return contours;
+}
+
+/**
+ * Extracts a specific diacritic mark from existing precomposed Vietnamese characters in the font
+ * (e.g., isolating the acute mark from 'á', tilde from 'ẽ', horn from 'ơ'/'ư', etc.)
+ */
+export function extractDiacriticFromComposedGlyph(font: any, diaId: string): any {
+  if (!font) return null;
+
+  const PRECOMPOSED_MAP: Record<string, {
+    targetType: 'upper' | 'lower' | 'horn' | 'bar';
+    candidates: Array<{ composedChar: string; baseChar: string }>;
+  }> = {
+    grave: {
+      targetType: 'upper',
+      candidates: [
+        { composedChar: 'à', baseChar: 'a' },
+        { composedChar: 'è', baseChar: 'e' },
+        { composedChar: 'ò', baseChar: 'o' },
+        { composedChar: 'ù', baseChar: 'u' },
+        { composedChar: 'ì', baseChar: 'i' },
+        { composedChar: 'ỳ', baseChar: 'y' },
+        { composedChar: 'À', baseChar: 'A' },
+        { composedChar: 'È', baseChar: 'E' },
+        { composedChar: 'Ò', baseChar: 'O' },
+        { composedChar: 'Ù', baseChar: 'U' },
+        { composedChar: 'Ỳ', baseChar: 'Y' },
+        { composedChar: 'ầ', baseChar: 'â' },
+        { composedChar: 'ề', baseChar: 'ê' },
+        { composedChar: 'ồ', baseChar: 'ô' },
+        { composedChar: 'ằ', baseChar: 'ă' },
+        { composedChar: 'ờ', baseChar: 'ơ' },
+        { composedChar: 'ừ', baseChar: 'ư' },
+        { composedChar: 'Ầ', baseChar: 'Â' },
+        { composedChar: 'Ề', baseChar: 'Ê' },
+        { composedChar: 'Ồ', baseChar: 'Ô' },
+        { composedChar: 'Ằ', baseChar: 'Ă' },
+        { composedChar: 'Ờ', baseChar: 'Ơ' },
+        { composedChar: 'Ừ', baseChar: 'Ư' }
+      ]
+    },
+    acute: {
+      targetType: 'upper',
+      candidates: [
+        { composedChar: 'á', baseChar: 'a' },
+        { composedChar: 'é', baseChar: 'e' },
+        { composedChar: 'ó', baseChar: 'o' },
+        { composedChar: 'ú', baseChar: 'u' },
+        { composedChar: 'í', baseChar: 'i' },
+        { composedChar: 'ý', baseChar: 'y' },
+        { composedChar: 'Á', baseChar: 'A' },
+        { composedChar: 'É', baseChar: 'E' },
+        { composedChar: 'Ó', baseChar: 'O' },
+        { composedChar: 'Ú', baseChar: 'U' },
+        { composedChar: 'Ý', baseChar: 'Y' },
+        { composedChar: 'ấ', baseChar: 'â' },
+        { composedChar: 'ế', baseChar: 'ê' },
+        { composedChar: 'ố', baseChar: 'ô' },
+        { composedChar: 'ắ', baseChar: 'ă' },
+        { composedChar: 'ớ', baseChar: 'ơ' },
+        { composedChar: 'ứ', baseChar: 'ư' },
+        { composedChar: 'Ấ', baseChar: 'Â' },
+        { composedChar: 'Ế', baseChar: 'Ê' },
+        { composedChar: 'Ố', baseChar: 'Ô' },
+        { composedChar: 'Ắ', baseChar: 'Ă' },
+        { composedChar: 'Ớ', baseChar: 'Ơ' },
+        { composedChar: 'Ứ', baseChar: 'Ư' }
+      ]
+    },
+    hook: {
+      targetType: 'upper',
+      candidates: [
+        { composedChar: 'ả', baseChar: 'a' },
+        { composedChar: 'ẻ', baseChar: 'e' },
+        { composedChar: 'ỏ', baseChar: 'o' },
+        { composedChar: 'ủ', baseChar: 'u' },
+        { composedChar: 'ỉ', baseChar: 'i' },
+        { composedChar: 'ỷ', baseChar: 'y' },
+        { composedChar: 'Ả', baseChar: 'A' },
+        { composedChar: 'Ẻ', baseChar: 'E' },
+        { composedChar: 'Ỏ', baseChar: 'O' },
+        { composedChar: 'Ủ', baseChar: 'U' },
+        { composedChar: 'Ỷ', baseChar: 'Y' },
+        { composedChar: 'ẩ', baseChar: 'â' },
+        { composedChar: 'ể', baseChar: 'ê' },
+        { composedChar: 'ổ', baseChar: 'ô' },
+        { composedChar: 'ẳ', baseChar: 'ă' },
+        { composedChar: 'ở', baseChar: 'ơ' },
+        { composedChar: 'ử', baseChar: 'ư' },
+        { composedChar: 'Ẩ', baseChar: 'Â' },
+        { composedChar: 'Ể', baseChar: 'Ê' },
+        { composedChar: 'Ổ', baseChar: 'Ô' },
+        { composedChar: 'Ẳ', baseChar: 'Ă' },
+        { composedChar: 'Ở', baseChar: 'Ơ' },
+        { composedChar: 'Ử', baseChar: 'Ư' }
+      ]
+    },
+    tilde: {
+      targetType: 'upper',
+      candidates: [
+        { composedChar: 'ã', baseChar: 'a' },
+        { composedChar: 'ẽ', baseChar: 'e' },
+        { composedChar: 'õ', baseChar: 'o' },
+        { composedChar: 'ũ', baseChar: 'u' },
+        { composedChar: 'ĩ', baseChar: 'i' },
+        { composedChar: 'ỹ', baseChar: 'y' },
+        { composedChar: 'Ã', baseChar: 'A' },
+        { composedChar: 'Ẽ', baseChar: 'E' },
+        { composedChar: 'Õ', baseChar: 'O' },
+        { composedChar: 'Ũ', baseChar: 'U' },
+        { composedChar: 'Ỹ', baseChar: 'Y' },
+        { composedChar: 'ẫ', baseChar: 'â' },
+        { composedChar: 'ễ', baseChar: 'ê' },
+        { composedChar: 'ỗ', baseChar: 'ô' },
+        { composedChar: 'ẵ', baseChar: 'ă' },
+        { composedChar: 'ỡ', baseChar: 'ơ' },
+        { composedChar: 'ữ', baseChar: 'ư' },
+        { composedChar: 'Ẫ', baseChar: 'Â' },
+        { composedChar: 'Ễ', baseChar: 'Ê' },
+        { composedChar: 'Ỗ', baseChar: 'Ô' },
+        { composedChar: 'Ẵ', baseChar: 'Ă' },
+        { composedChar: 'Ỡ', baseChar: 'Ơ' },
+        { composedChar: 'Ữ', baseChar: 'Ư' }
+      ]
+    },
+    dot_below: {
+      targetType: 'lower',
+      candidates: [
+        { composedChar: 'ạ', baseChar: 'a' },
+        { composedChar: 'ẹ', baseChar: 'e' },
+        { composedChar: 'ọ', baseChar: 'o' },
+        { composedChar: 'ụ', baseChar: 'u' },
+        { composedChar: 'ị', baseChar: 'i' },
+        { composedChar: 'ỵ', baseChar: 'y' },
+        { composedChar: 'Ạ', baseChar: 'A' },
+        { composedChar: 'Ẹ', baseChar: 'E' },
+        { composedChar: 'Ọ', baseChar: 'O' },
+        { composedChar: 'Ụ', baseChar: 'U' },
+        { composedChar: 'Ỵ', baseChar: 'Y' },
+        { composedChar: 'ậ', baseChar: 'â' },
+        { composedChar: 'ệ', baseChar: 'ê' },
+        { composedChar: 'ộ', baseChar: 'ô' },
+        { composedChar: 'ặ', baseChar: 'ă' },
+        { composedChar: 'ợ', baseChar: 'ơ' },
+        { composedChar: 'ự', baseChar: 'ư' },
+        { composedChar: 'Ậ', baseChar: 'Â' },
+        { composedChar: 'Ệ', baseChar: 'Ê' },
+        { composedChar: 'Ộ', baseChar: 'Ô' },
+        { composedChar: 'Ặ', baseChar: 'Ă' },
+        { composedChar: 'Ợ', baseChar: 'Ơ' },
+        { composedChar: 'Ự', baseChar: 'Ư' }
+      ]
+    },
+    circumflex: {
+      targetType: 'upper',
+      candidates: [
+        { composedChar: 'â', baseChar: 'a' },
+        { composedChar: 'ê', baseChar: 'e' },
+        { composedChar: 'ô', baseChar: 'o' },
+        { composedChar: 'Â', baseChar: 'A' },
+        { composedChar: 'Ê', baseChar: 'E' },
+        { composedChar: 'Ô', baseChar: 'O' }
+      ]
+    },
+    breve: {
+      targetType: 'upper',
+      candidates: [
+        { composedChar: 'ă', baseChar: 'a' },
+        { composedChar: 'Ă', baseChar: 'A' }
+      ]
+    },
+    horn_o: {
+      targetType: 'horn',
+      candidates: [
+        { composedChar: 'ơ', baseChar: 'o' },
+        { composedChar: 'Ơ', baseChar: 'O' }
+      ]
+    },
+    horn_u: {
+      targetType: 'horn',
+      candidates: [
+        { composedChar: 'ư', baseChar: 'u' },
+        { composedChar: 'Ư', baseChar: 'U' }
+      ]
+    },
+    bar: {
+      targetType: 'bar',
+      candidates: [
+        { composedChar: 'đ', baseChar: 'd' },
+        { composedChar: 'Đ', baseChar: 'D' }
+      ]
+    }
+  };
+
+  const config = PRECOMPOSED_MAP[diaId];
+  if (!config) return null;
+
+  for (const { composedChar, baseChar } of config.candidates) {
+    try {
+      const compIdx = font.charToGlyphIndex(composedChar);
+      if (compIdx <= 0) continue;
+
+      const compGlyph = font.glyphs.get(compIdx);
+      if (!compGlyph || !compGlyph.path || !compGlyph.path.commands || compGlyph.path.commands.length === 0) {
+        continue;
+      }
+
+      const baseIdx = font.charToGlyphIndex(baseChar);
+      let baseBBox = { xMin: 50, xMax: 450, yMin: 0, yMax: font.tables?.os2?.sTypoXHeight || 500 };
+
+      let baseGlyph: any = null;
+      if (baseIdx > 0) {
+        baseGlyph = font.glyphs.get(baseIdx);
+        if (baseGlyph && baseGlyph.path && baseGlyph.path.commands && baseGlyph.path.commands.length > 0) {
+          const baseCmds = baseChar === 'i' ? removeDotFromICommands(baseGlyph.path.commands) : baseGlyph.path.commands;
+          baseBBox = getExactBoundingBox(baseCmds);
+        }
+      }
+
+      const contours = getGlyphContours(compGlyph.path.commands);
+      if (contours.length <= 1 && config.targetType !== 'bar') {
+        // If single contour and not a bar, diacritic is merged into body, hard to split safely
+        continue;
+      }
+
+      const matchedCmds: any[] = [];
+
+      for (const contour of contours) {
+        const cBBox = getExactBoundingBox(contour);
+        const baseHeight = Math.max(100, baseBBox.yMax - baseBBox.yMin);
+        const baseWidth = Math.max(100, baseBBox.xMax - baseBBox.xMin);
+
+        let isMatch = false;
+
+        if (config.targetType === 'upper') {
+          const isAccentBase = ['â', 'ê', 'ô', 'ă', 'ơ', 'ư', 'Â', 'Ê', 'Ô', 'Ă', 'Ơ', 'Ư'].includes(baseChar);
+          if (isAccentBase) {
+            // Secondary tone mark sitting above/on top of a precomposed base character (like 'â', 'ă')
+            if (cBBox.yMin >= baseBBox.yMax - 100 && cBBox.yMax > baseBBox.yMax - 30) {
+              isMatch = true;
+            }
+          } else {
+            // Primary tone mark sitting in the upper region of a simple base character (like 'a', 'e', 'o')
+            if (
+              cBBox.yMin >= baseBBox.yMin + baseHeight * 0.35 &&
+              cBBox.yMax >= baseBBox.yMin + baseHeight * 0.55 &&
+              cBBox.yMin >= baseBBox.yMax - 150
+            ) {
+              isMatch = true;
+            }
+          }
+        } else if (config.targetType === 'lower') {
+          // Contour sits below bottom of base glyph
+          if (cBBox.yMax <= baseBBox.yMin + baseHeight * 0.45 && cBBox.yMin < baseBBox.yMin + 30) {
+            isMatch = true;
+          }
+        } else if (config.targetType === 'horn') {
+          // Contour sits near top-right of base glyph (for ơ / ư)
+          if (
+            cBBox.xMin >= baseBBox.xMin + baseWidth * 0.3 &&
+            cBBox.yMin >= baseBBox.yMin + baseHeight * 0.3 &&
+            cBBox.yMax > baseBBox.yMin + baseHeight * 0.45 &&
+            (cBBox.xMax - cBBox.xMin) < baseWidth * 0.85
+          ) {
+            isMatch = true;
+          }
+        } else if (config.targetType === 'bar') {
+          // Contour is horizontal crossbar on d/D
+          if (
+            cBBox.yMin >= baseBBox.yMin + baseHeight * 0.15 &&
+            cBBox.yMax <= baseBBox.yMax * 0.95 &&
+            (cBBox.xMin <= baseBBox.xMin + 20 || cBBox.xMax >= baseBBox.xMax - 20)
+          ) {
+            isMatch = true;
+          }
+        }
+
+        if (isMatch) {
+          matchedCmds.push(...contour);
+        }
+      }
+
+      if (matchedCmds.length > 0) {
+        // Construct extracted glyph using opentype.Path instance
+        const path = new opentype.Path();
+        path.commands = matchedCmds;
+        const dummyGlyph = new opentype.Glyph({
+          name: diaId + '_extracted',
+          advanceWidth: baseGlyph?.advanceWidth || compGlyph.advanceWidth || 500,
+          path: path
+        });
+        return dummyGlyph;
+      }
+    } catch (err) {
+      // Ignore individual character extraction errors and continue to next candidate
     }
   }
 
@@ -1643,6 +2212,99 @@ export function extractSvgFromGlyph(glyph: any, fontUnitsPerEm: number = 1000): 
 
   return parts.join('');
 }
+
+/**
+ * Gets the SVG path string d="..." for a full native character glyph in the font.
+ */
+export function getNativeCharSvgPath(font: any, char: string): string {
+  if (!font) return '';
+  const idx = font.charToGlyphIndex(char);
+  if (idx <= 0) return '';
+  const glyph = font.glyphs.get(idx);
+  if (!glyph || !glyph.path) return '';
+  const ascender = font.tables?.os2?.sTypoAscender || font.ascender || 800;
+  const upm = font.unitsPerEm || 1000;
+  const path = glyph.getPath(0, ascender, upm);
+  return path.toPathData(2);
+}
+
+/**
+ * Gets the full <svg>...</svg> element string for a full native character glyph in the font.
+ */
+export function getNativeCharFullSvg(font: any, char: string): string {
+  const d = getNativeCharSvgPath(font, char);
+  if (!d) return '';
+  const upm = font?.unitsPerEm || 1000;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${upm} ${upm}" width="100%" height="100%">\n  <path d="${d}" fill="currentColor" />\n</svg>`;
+}
+
+/**
+ * Isolates and extracts the diacritic contour from a specific precomposed character (e.g. 'ã' relative to 'a') in the font.
+ */
+export function extractDiacriticFromSpecificChar(font: any, composedChar: string, baseChar: string): any {
+  if (!font) return null;
+  const compIdx = font.charToGlyphIndex(composedChar);
+  if (compIdx <= 0) return null;
+  const compGlyph = font.glyphs.get(compIdx);
+  if (!compGlyph || !compGlyph.path || !compGlyph.path.commands || compGlyph.path.commands.length === 0) {
+    return null;
+  }
+
+  const baseIdx = font.charToGlyphIndex(baseChar);
+  let baseBBox = { xMin: 50, xMax: 450, yMin: 0, yMax: font.tables?.os2?.sTypoXHeight || 500 };
+  let baseGlyph: any = null;
+  if (baseIdx > 0) {
+    baseGlyph = font.glyphs.get(baseIdx);
+    if (baseGlyph && baseGlyph.path && baseGlyph.path.commands && baseGlyph.path.commands.length > 0) {
+      const baseCmds = baseChar === 'i' ? removeDotFromICommands(baseGlyph.path.commands) : baseGlyph.path.commands;
+      baseBBox = getExactBoundingBox(baseCmds);
+    }
+  }
+
+  const contours = getGlyphContours(compGlyph.path.commands);
+  const matchedCmds: any[] = [];
+  const baseHeight = baseBBox.yMax - baseBBox.yMin;
+
+  for (const contour of contours) {
+    const cBBox = getExactBoundingBox(contour);
+    // Diacritic sits above base glyph or below
+    const isUpper = (cBBox.yMin >= baseBBox.yMin + baseHeight * 0.35 && cBBox.yMax >= baseBBox.yMin + baseHeight * 0.55 && cBBox.yMin >= baseBBox.yMax - 150);
+    const isLower = (cBBox.yMax <= baseBBox.yMin + baseHeight * 0.45 && cBBox.yMin < baseBBox.yMin + 30);
+    const isHorn = (cBBox.xMin >= baseBBox.xMin + (baseBBox.xMax - baseBBox.xMin) * 0.3 && cBBox.yMin >= baseBBox.yMin + baseHeight * 0.3);
+
+    if (isUpper || isLower || isHorn) {
+      matchedCmds.push(...contour);
+    }
+  }
+
+  if (matchedCmds.length === 0) return null;
+
+  const path = new opentype.Path();
+  path.commands = matchedCmds;
+  return new opentype.Glyph({
+    name: `${composedChar}_extracted_mark`,
+    advanceWidth: compGlyph.advanceWidth || 500,
+    path: path
+  });
+}
+
+/**
+ * Gets extracted diacritic SVG path string for a specific composed character.
+ */
+export function getExtractedDiacriticSvgPathFromChar(font: any, composedChar: string, baseChar: string): string {
+  const extractedGlyph = extractDiacriticFromSpecificChar(font, composedChar, baseChar);
+  if (!extractedGlyph) return '';
+  return extractSvgFromGlyph(extractedGlyph, font.unitsPerEm || 1000);
+}
+
+/**
+ * Gets full <svg>...</svg> code string for an extracted diacritic path.
+ */
+export function formatSvgPathToFullSvg(pathD: string): string {
+  if (!pathD) return '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-250 -250 500 500" width="100%" height="100%">\n  <path d="${pathD}" fill="currentColor" />\n</svg>`;
+}
+
 
 
 

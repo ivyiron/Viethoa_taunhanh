@@ -9,6 +9,7 @@ import {
   DEFAULT_DIACRITICS, 
   DEFAULT_AUTO_RULES, 
   VIETNAMESE_RECIPES, 
+  getTrackingFamilyMembers,
   composeGlyphPath, 
   ensureKerningPairsPopulated, 
   injectAdvancedLayoutTables, 
@@ -16,7 +17,7 @@ import {
   findCandidateGlyph,
   extractSvgFromGlyph
 } from './utils';
-import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid } from 'lucide-react';
+import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   const [originalFont, setOriginalFont] = useState<opentype.Font | null>(null);
@@ -29,6 +30,10 @@ export default function App() {
   const [rules, setRules] = useState<AutoPositionRules>(DEFAULT_AUTO_RULES);
   const [overrides, setOverrides] = useState<Record<string, GlyphOverrideState>>({});
   
+  // Existing Vietnamese glyph preservation
+  const [preserveExistingGlyphs, setPreserveExistingGlyphs] = useState<boolean>(true);
+  const [existingGlyphInfo, setExistingGlyphInfo] = useState<{ count: number; total: number; samples: string[] }>({ count: 0, total: 134, samples: [] });
+
   const [activeTab, setActiveTab] = useState<'components' | 'composite'>('components');
   
   const [compiledBuffer, setCompiledBuffer] = useState<ArrayBuffer | null>(null);
@@ -74,6 +79,25 @@ export default function App() {
     setCustomFamilyName(meta.family + ' Viet');
     setCustomSubfamilyName(meta.subfamily || 'Regular');
 
+    // Scan font to detect existing Vietnamese characters
+    const existingList: string[] = [];
+    VIETNAMESE_RECIPES.forEach((recipe) => {
+      const idx = loadedFont.charToGlyphIndex(recipe.char);
+      if (idx > 0) {
+        const g = loadedFont.glyphs.get(idx);
+        if (g && g.path && g.path.commands && g.path.commands.length > 0) {
+          existingList.push(recipe.char);
+        }
+      }
+    });
+
+    const existingInfo = {
+      count: existingList.length,
+      total: VIETNAMESE_RECIPES.length,
+      samples: existingList.slice(0, 8)
+    };
+    setExistingGlyphInfo(existingInfo);
+
     // Initialize 9 diacritics templates from DEFAULT_DIACRITICS,
     // with suggestive automatic extraction from the loaded font!
     const initialTemplates: Record<string, DiacriticTemplate> = {};
@@ -105,7 +129,11 @@ export default function App() {
     });
     setTemplates(initialTemplates);
 
-    if (extractedCount > 0) {
+    if (existingInfo.count === VIETNAMESE_RECIPES.length) {
+      setAppSuccess(`Font đã có ĐẦY ĐỦ 134/134 ký tự tiếng Việt! Ứng dụng sẽ GIỮ NGUYÊN các ký tự gốc và không ghi đè.`);
+    } else if (existingInfo.count > 0) {
+      setAppSuccess(`Phát hiện font đã có sẵn ${existingInfo.count}/${VIETNAMESE_RECIPES.length} ký tự tiếng Việt (ví dụ: ${existingInfo.samples.slice(0, 6).join(', ')}...). App sẽ GIỮ NGUYÊN các ký tự này và tự động lấy mẫu dấu từ chúng để tạo gợi ý dấu cho các ký tự còn thiếu!`);
+    } else if (extractedCount > 0) {
       setAppSuccess(`Đã tự động trích xuất thành công ${extractedCount}/9 dấu mẫu (${extractedList.join(', ')}) trực tiếp từ các ký tự có sẵn trong tệp font!`);
     } else {
       setAppSuccess('Đã nạp tệp font thành công. Sử dụng hệ thống dấu mẫu mặc định.');
@@ -160,13 +188,47 @@ export default function App() {
 
   const handleUpdateOverride = useCallback((char: string, updated: Partial<GlyphOverrideState>) => {
     setOverrides((prev) => {
-      const current = prev[char];
-      if (!current) return prev;
-      return {
-        ...prev,
-        [char]: { ...current, ...updated }
+      const next = { ...prev };
+      const current = next[char] || {
+        char,
+        offsetX: 0,
+        offsetY: 0,
+        scaleX: 1.0,
+        scaleY: 1.0,
+        advanceWidthTweak: 0,
+        isCompleted: false
       };
+
+      next[char] = { ...current, ...updated };
+
+      // If advanceWidthTweak (tracking) is modified, propagate to all related family members
+      if (updated.advanceWidthTweak !== undefined) {
+        const familyMembers = getTrackingFamilyMembers(char);
+        familyMembers.forEach((fChar) => {
+          if (fChar !== char) {
+            const fCurrent = next[fChar] || {
+              char: fChar,
+              offsetX: 0,
+              offsetY: 0,
+              scaleX: 1.0,
+              scaleY: 1.0,
+              advanceWidthTweak: 0,
+              isCompleted: false
+            };
+            next[fChar] = {
+              ...fCurrent,
+              advanceWidthTweak: updated.advanceWidthTweak!
+            };
+          }
+        });
+      }
+
+      return next;
     });
+  }, []);
+
+  const handleBatchUpdateOverrides = useCallback((updater: (prev: Record<string, GlyphOverrideState>) => Record<string, GlyphOverrideState>) => {
+    setOverrides(updater);
   }, []);
 
   // V2 Compiler Action
@@ -240,16 +302,24 @@ export default function App() {
 
       // Compose and inject all 134 Vietnamese composite glyphs
       VIETNAMESE_RECIPES.forEach(recipe => {
+        const unicode = recipe.char.charCodeAt(0);
+        const existingIndex = font.charToGlyphIndex(recipe.char);
+        const existingGlyph = existingIndex > 0 ? font.glyphs.get(existingIndex) : null;
+        const hasOriginalPath = existingGlyph && existingGlyph.path && existingGlyph.path.commands && existingGlyph.path.commands.length > 0;
+
+        // If character already exists natively in the font and preserve option is enabled, DO NOT overwrite it!
+        if (preserveExistingGlyphs && hasOriginalPath) {
+          return;
+        }
+
         const override = overrides[recipe.char];
         
         // Bake composite path and compute customized tracking
-        const { path, advanceWidth, hornInfo } = composeGlyphPath(font, recipe, templates, rules, override);
+        const { path, advanceWidth, hornInfo } = composeGlyphPath(font, recipe, templates, rules, override, preserveExistingGlyphs);
         if (hornInfo) {
           charHornInfo[recipe.char] = hornInfo;
         }
-        
-        const unicode = recipe.char.charCodeAt(0);
-        const existingIndex = font.charToGlyphIndex(recipe.char);
+
         const glyphOptions = {
           name: recipe.char,
           unicode: unicode,
@@ -479,7 +549,7 @@ export default function App() {
       </div>
 
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      <div className="w-full max-w-[1920px] mx-auto px-4 py-6 sm:px-6 lg:px-10 space-y-8">
         
         {/* Header Branding */}
         <header id="app-header" className="border-b border-neutral-200 pb-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -511,6 +581,40 @@ export default function App() {
 
         {originalFont && metadata && (
           <>
+            {/* Notification Banner when original font already contains some Vietnamese glyphs */}
+            {existingGlyphInfo.count > 0 && (
+              <div className="bg-amber-50/90 border border-amber-200 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-amber-950 shadow-xs animate-fade-in">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-amber-100 rounded-xl shrink-0 text-amber-800 mt-0.5 md:mt-0">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-extrabold text-amber-950">
+                        Phát hiện {existingGlyphInfo.count}/{existingGlyphInfo.total} ký tự tiếng Việt đã có sẵn trong font gốc
+                      </h4>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded-md">
+                        Mẫu: {existingGlyphInfo.samples.join(', ')}
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-900/80 leading-relaxed">
+                      Ứng dụng sẽ <strong>bảo toàn 100% bản gốc</strong> của các ký tự này và không ghi đè khi xuất font. Đồng thời, dữ liệu dấu của chúng đã được tự động trích xuất để tạo gợi ý cho các ký tự còn thiếu.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs font-bold text-amber-950 bg-white/90 hover:bg-white px-3.5 py-2 rounded-xl border border-amber-200/80 cursor-pointer shrink-0 transition shadow-2xs select-none">
+                  <input
+                    type="checkbox"
+                    checked={preserveExistingGlyphs}
+                    onChange={(e) => setPreserveExistingGlyphs(e.target.checked)}
+                    className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
+                  />
+                  <span>Giữ nguyên ký tự có sẵn (Khuyên dùng)</span>
+                </label>
+              </div>
+            )}
+
             {/* V2 WORKSPACE TABS */}
             <div className="space-y-4">
               
@@ -559,6 +663,8 @@ export default function App() {
                     rules={rules}
                     overrides={overrides}
                     onUpdateOverride={handleUpdateOverride}
+                    onBatchUpdateOverrides={handleBatchUpdateOverrides}
+                    preserveExistingGlyphs={preserveExistingGlyphs}
                   />
                 )}
               </div>
@@ -569,16 +675,20 @@ export default function App() {
             <section id="compile-and-playground-section" className="space-y-6 pt-6 border-t border-neutral-200">
               
               {/* Custom Metadata Rename Card */}
-              <div className="bg-white border border-neutral-200 p-6 rounded-xl shadow-xs space-y-4">
-                <div className="flex items-center gap-2 border-b border-neutral-100 pb-3">
-                  <Sliders className="w-5 h-5 text-neutral-800" />
-                  <div>
-                    <h4 className="text-sm font-bold text-neutral-900">
-                      Cấu hình Tên Font Việt Hóa
-                    </h4>
-                    <p className="text-xs text-neutral-500 mt-0.5">
-                      Đổi tên Font để tránh bị ghi đè, trùng lặp hoặc lẫn lộn với font gốc chưa Việt hóa khi cài đặt vào máy tính.
-                    </p>
+              <div className="bg-white border border-neutral-200 p-6 rounded-2xl shadow-xs space-y-4">
+                <div className="flex items-start sm:items-center justify-between gap-4 border-b border-neutral-100 pb-4">
+                  <div className="flex items-start sm:items-center gap-3">
+                    <span className="p-2 bg-neutral-900 text-white rounded-xl inline-flex items-center justify-center shrink-0 shadow-2xs">
+                      <Sliders className="w-4.5 h-4.5 text-amber-400" />
+                    </span>
+                    <div>
+                      <h3 className="text-base font-extrabold text-neutral-950 tracking-tight">
+                        Cấu Hình Tên Font Việt Hóa
+                      </h3>
+                      <p className="text-xs text-neutral-500 mt-0.5">
+                        Đổi tên Font để tránh bị ghi đè, trùng lặp hoặc lẫn lộn với font gốc chưa Việt hóa khi cài đặt vào máy tính.
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -629,15 +739,19 @@ export default function App() {
               </div>
 
               {/* Compile & Download Controls Card */}
-              <div className="bg-neutral-900 text-neutral-100 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-4 border border-neutral-850 shadow-md">
-                <div className="space-y-1 text-center sm:text-left">
-                  <h4 className="text-sm font-bold text-white flex items-center justify-center sm:justify-start gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    Đóng Gói Bộ Font Việt Hóa 2.0
-                  </h4>
-                  <p className="text-xs text-neutral-400 max-w-md">
-                    Biên dịch toàn bộ 134 ký tự đã được thiết lập tự động bên trên thành một tệp font thống nhất, bảo toàn nguyên vẹn tính năng OpenType và Kerning gốc.
-                  </p>
+              <div className="bg-neutral-900 text-neutral-100 p-6 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border border-neutral-800 shadow-md">
+                <div className="flex items-start sm:items-center gap-3">
+                  <span className="p-2 bg-neutral-800 text-white rounded-xl inline-flex items-center justify-center shrink-0 border border-neutral-700/60 shadow-2xs">
+                    <Sparkles className="w-4.5 h-4.5 text-amber-400" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white tracking-tight">
+                      Đóng Gói Bộ Font Việt Hóa 2.0
+                    </h3>
+                    <p className="text-xs text-neutral-400 mt-0.5 max-w-md">
+                      Biên dịch toàn bộ 134 ký tự đã được thiết lập tự động bên trên thành một tệp font thống nhất, bảo toàn nguyên vẹn tính năng OpenType và Kerning gốc.
+                    </p>
+                  </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto shrink-0">
