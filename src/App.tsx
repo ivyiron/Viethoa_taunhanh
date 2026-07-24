@@ -680,12 +680,11 @@ export default function App() {
         {/* Header Branding */}
         <header id="app-header" className="border-b border-neutral-200 pb-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-neutral-950 tracking-tight font-sans flex items-center gap-2">
-              <Sliders className="w-6 h-6 text-neutral-950" />
-              Việt hóa tàu nhanh
-            </h1>
-            <p className="text-sm text-neutral-500 mt-1 max-w-2xl leading-normal">
-              Việt hóa theo chủ nghĩa vô học: Chỉ cần thêm 9 ký tự dấu hệ thống sẽ xào lại toàn bộ font.
+            <div className="flex items-center gap-2">
+              <img src="/Logo.svg" alt="Việt hóa tàu nhanh" className="h-11 sm:h-14 w-auto object-contain object-left" />
+            </div>
+            <p className="text-sm text-neutral-500 mt-2 max-w-2xl leading-normal font-medium">
+              Hệ thống Việt hóa tàu nhanh: Chỉ cần thêm 9 ký tự dấu hệ thống sẽ xào lại toàn bộ font.
             </p>
           </div>
 
@@ -949,7 +948,7 @@ export default function App() {
               <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 text-white text-xs font-bold rounded-full mb-3">3</span>
               <h4 className="font-bold text-sm text-neutral-900 mb-1">Sao chép Kerning 100%</h4>
               <p className="text-xs text-neutral-500 leading-normal">
-                Tất cả 134 ký tự mới tự động được thừa hưởng 100% dữ liệu Kerning từ các chữ cái gốc (a, e, o, u, d...). Đảm bảo khoảng cách hiển thị văn bản tự nhiên, tinh tế.
+                Tất cả 134 ký tự mới tự động được thừa hưởng (clone) 100% dữ liệu Kerning từ các chữ cái gốc (a, e, o, u, d...). Đảm bảo khoảng cách hiển thị văn bản tự nhiên, tinh tế.
               </p>
             </div>
           </section>
