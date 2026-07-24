@@ -25,6 +25,7 @@ export interface DiacriticTemplate {
 }
 
 export interface AutoPositionRules {
+  useGroupHeightAlignment?: boolean; // Align diacritic Y heights by vowel group (x-Height / Cap-Height / Baseline) for 100% consistent accent lines (default: true)
   lowercaseAccentGap: number;  // Distance above lowercase letter top (default: 45)
   uppercaseAccentGap: number;  // Distance above uppercase letter top (default: 55)
   lowercaseAccentScale: number; // Scale factor for accents on lowercase (default: 0.8)

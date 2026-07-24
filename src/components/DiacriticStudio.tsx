@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as opentype from 'opentype.js';
 import { Sliders, Sparkles, Copy, Trash2, ArrowLeftRight, Link, Link2Off, ZoomIn, ZoomOut, RotateCcw, AlertCircle, HelpCircle, Check, Layers, Code, FileCode, Search, X } from 'lucide-react';
 import { DiacriticTemplate, AutoPositionRules, FontMetadata } from '../types';
-import { getExactBoundingBox, removeDotFromICommands, parseSvgPath, extractPathDataFromSvg, transformCommands, calculateAutoPosition, DEFAULT_DIACRITICS, findCandidateGlyph, extractSvgFromGlyph, VIETNAMESE_RECIPES, composeGlyphPath, getNativeCharSvgPath, getNativeCharFullSvg, extractDiacriticFromSpecificChar, getExtractedDiacriticSvgPathFromChar, formatSvgPathToFullSvg } from '../utils';
+import { getExactBoundingBox, removeDotFromICommands, parseSvgPath, extractPathDataFromSvg, transformCommands, calculateAutoPosition, getGroupReferenceHeights, DEFAULT_DIACRITICS, findCandidateGlyph, extractSvgFromGlyph, VIETNAMESE_RECIPES, composeGlyphPath, getNativeCharSvgPath, getNativeCharFullSvg, extractDiacriticFromSpecificChar, getExtractedDiacriticSvgPathFromChar, formatSvgPathToFullSvg } from '../utils';
 
 // Double Accent Vowel Groups configuration
 const DOUBLE_ACCENT_GROUPS = [
@@ -1308,12 +1308,16 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
           const diaBBox = getExactBoundingBox(templateTransformed);
           
           // Calculate auto position values
+          const groupHeights = getGroupReferenceHeights(font);
           const autoPos = calculateAutoPosition(
             activeDiaId,
             baseBBox,
             diaBBox,
             rules,
-            isCapitalPreview
+            isCapitalPreview,
+            undefined,
+            groupHeights,
+            isCapitalPreview ? selectedBaseChar.toUpperCase() : selectedBaseChar.toLowerCase()
           );
 
           const useAutoCenterX = autoCenterXToUse;
@@ -2065,6 +2069,24 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
               <Sliders className="w-3.5 h-3.5 text-neutral-700" />
               Quy tắc Định Vị Toàn Cục (Rules)
             </h5>
+
+            {/* Toggle Group Height Alignment */}
+            <div className="p-2.5 bg-neutral-50/80 rounded-lg border border-neutral-200/80 space-y-1">
+              <label className="flex items-center justify-between gap-2 cursor-pointer">
+                <span className="text-[11px] font-bold text-neutral-800">
+                  Căn lề Y phẳng theo Nhóm chữ (x-Height / Baseline)
+                </span>
+                <input
+                  type="checkbox"
+                  checked={rules.useGroupHeightAlignment !== false}
+                  onChange={(e) => onUpdateRules({ useGroupHeightAlignment: e.target.checked })}
+                  className="w-4 h-4 rounded border-neutral-300 text-neutral-900 focus:ring-0 cursor-pointer accent-neutral-900"
+                />
+              </label>
+              <p className="text-[10px] text-neutral-500 leading-tight">
+                Tự động căn phẳng cao độ dấu trên tất cả các ký tự cùng nhóm (x-Height cho á, é, ó, í, ý... và Cap-Height cho Á, É, Ó, Í, Ý...). Tránh hiện tượng nhấp nhô dấu giữa các chữ cái.
+              </p>
+            </div>
 
             {/* Gap settings */}
             <div className="space-y-2.5">

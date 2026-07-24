@@ -1415,6 +1415,7 @@ export const DEFAULT_DIACRITICS: DiacriticTemplate[] = [
 ];
 
 export const DEFAULT_AUTO_RULES: AutoPositionRules = {
+  useGroupHeightAlignment: true,
   lowercaseAccentGap: 35,
   uppercaseAccentGap: 50,
   lowercaseAccentScale: 1.0,
@@ -1545,8 +1546,69 @@ export const STEP2_RECIPES: ComponentRecipe[] = [
 ];
 
 /**
+ * Calculates standard group reference heights (x-height max and cap-height max)
+ * across plain Vietnamese base vowels (a, e, o, u, y, i vs A, E, O, U, Y, I).
+ * This ensures diacritics sit at 100% consistent Y-levels across character groups.
+ */
+export function getGroupReferenceHeights(font: opentype.Font | null): { xHeightMax: number; capHeightMax: number } {
+  if (!font) return { xHeightMax: 500, capHeightMax: 700 };
+
+  // Use flat lowercase vowels/letters without ascenders or dots
+  const lowercaseFlatVowels = ['x', 'a', 'e', 'o', 'u'];
+  const uppercaseFlatVowels = ['X', 'A', 'E', 'O', 'U', 'H'];
+
+  let measuredXHeights: number[] = [];
+  lowercaseFlatVowels.forEach(ch => {
+    const gIndex = font.charToGlyphIndex(ch);
+    if (gIndex > 0) {
+      const g = font.glyphs.get(gIndex);
+      if (g) {
+        const bbox = g.getBoundingBox();
+        if (bbox && bbox.y2 > 100) {
+          measuredXHeights.push(bbox.y2);
+        }
+      }
+    }
+  });
+
+  let measuredCapHeights: number[] = [];
+  uppercaseFlatVowels.forEach(ch => {
+    const gIndex = font.charToGlyphIndex(ch);
+    if (gIndex > 0) {
+      const g = font.glyphs.get(gIndex);
+      if (g) {
+        const bbox = g.getBoundingBox();
+        if (bbox && bbox.y2 > 200) {
+          measuredCapHeights.push(bbox.y2);
+        }
+      }
+    }
+  });
+
+  let xHeightMax = 0;
+  if (measuredXHeights.length > 0) {
+    xHeightMax = Math.max(...measuredXHeights);
+  } else if (font.tables.os2 && font.tables.os2.sxHeight && font.tables.os2.sxHeight > 200) {
+    xHeightMax = font.tables.os2.sxHeight;
+  } else {
+    xHeightMax = 500;
+  }
+
+  let capHeightMax = 0;
+  if (measuredCapHeights.length > 0) {
+    capHeightMax = Math.max(...measuredCapHeights);
+  } else if (font.tables.os2 && font.tables.os2.sCapHeight && font.tables.os2.sCapHeight > 300) {
+    capHeightMax = font.tables.os2.sCapHeight;
+  } else {
+    capHeightMax = font.ascender || 700;
+  }
+
+  return { xHeightMax, capHeightMax };
+}
+
+/**
  * Calculates the exact translation scaling and offsets required to automatically align a diacritic on top/bottom of a base glyph.
- * Uses bounding boxes for highly professional type design results.
+ * Uses bounding boxes and Group Reference Heights for highly professional type design results.
  */
 export function calculateAutoPosition(
   diaId: string,
@@ -1554,11 +1616,38 @@ export function calculateAutoPosition(
   diaBBox: { xMin: number; yMin: number; xMax: number; yMax: number },
   rules: AutoPositionRules,
   isCapital: boolean,
-  previousPlacedBox?: { xMin: number; yMin: number; xMax: number; yMax: number }
+  previousPlacedBox?: { xMin: number; yMin: number; xMax: number; yMax: number },
+  groupReferenceHeights?: { xHeightMax: number; capHeightMax: number },
+  baseChar?: string
 ): { scaleX: number; scaleY: number; offsetX: number; offsetY: number } {
-  const baseXCenter = (baseBBox.x1 + baseBBox.x2) / 2;
-  const baseYTop = baseBBox.y2;
-  const baseYBottom = baseBBox.y1;
+  let baseXCenter = (baseBBox.x1 + baseBBox.x2) / 2;
+
+  // Optical X centering ONLY for lowercase 'y' (ỵ)
+  // Lowercase 'y' has an asymmetric diagonal descender, whereas uppercase 'Y' (Ỵ) is horizontally symmetrical along X.
+  const isLowercaseY = baseChar ? baseChar === 'y' : (!isCapital && baseChar === undefined);
+  if (isLowercaseY) {
+    // For lowercase 'y', the bottom descender stem/vertex is shifted slightly right (~58% of bounding box width)
+    baseXCenter = baseBBox.x1 + (baseBBox.x2 - baseBBox.x1) * 0.58;
+  }
+
+  // Group Height Baseline Alignment eliminates vertical "bouncing" across á, é, ó, í, ý
+  // by anchoring diacritics to a unified Group Reference Height (x-Height for lowercase, Cap-Height for uppercase).
+  let baseYTop = baseBBox.y2;
+  if (rules.useGroupHeightAlignment !== false && !previousPlacedBox && groupReferenceHeights) {
+    if (isCapital && groupReferenceHeights.capHeightMax > 0) {
+      baseYTop = groupReferenceHeights.capHeightMax;
+    } else if (!isCapital && groupReferenceHeights.xHeightMax > 0) {
+      baseYTop = groupReferenceHeights.xHeightMax;
+    }
+  }
+
+  let baseYBottom = baseBBox.y1;
+  // For standard non-descender vowels (a, e, o, u, i), anchor bottom to y = 0 for 100% consistent dot_below baseline
+  if (rules.useGroupHeightAlignment !== false && !previousPlacedBox) {
+    if (baseBBox.y1 > -50) {
+      baseYBottom = 0;
+    }
+  }
   
   const diaWidth = diaBBox.xMax - diaBBox.xMin;
   const diaHeight = diaBBox.yMax - diaBBox.yMin;
@@ -1589,10 +1678,10 @@ export function calculateAutoPosition(
     // Strike bar through d or Đ
     if (isCapital) {
       offsetX = baseXCenter - (diaXCenter * scaleX) + rules.barOffsetX;
-      offsetY = baseYTop - 240 + rules.barOffsetY;
+      offsetY = baseBBox.y2 - 240 + rules.barOffsetY;
     } else {
       offsetX = baseBBox.x2 - (diaBBox.xMin * scaleX) - 80 + rules.barOffsetX;
-      offsetY = baseYTop - 130 + rules.barOffsetY;
+      offsetY = baseBBox.y2 - 130 + rules.barOffsetY;
     }
   } else {
     // Normal top marks: acute, grave, hook, tilde, circumflex, breve
@@ -1920,9 +2009,10 @@ export function composeGlyphPath(
 
     const diaBBox = getExactBoundingBox(templateTransformed);
     
-    // Auto align the diacritic based on the bounding boxes
+    // Auto align the diacritic based on the bounding boxes and group reference heights
     const prevBoxToPass = idx === 0 ? precomposedFirstAccentBox : previousBox;
-    const autoPos = calculateAutoPosition(diaId, baseBBox, diaBBox, rules, isCapital, prevBoxToPass);
+    const groupHeights = getGroupReferenceHeights(font);
+    const autoPos = calculateAutoPosition(diaId, baseBBox, diaBBox, rules, isCapital, prevBoxToPass, groupHeights, recipe.baseChar);
 
     // Apply template offsets and individual character override tweaks if present
     let finalScaleX = autoPos.scaleX;
