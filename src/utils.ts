@@ -1,4 +1,25 @@
 import * as opentype from 'opentype.js';
+import paper from 'paper';
+
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
 
 // Full list of 134 Vietnamese letters requiring accents/diacritics
 export const VIETNAMESE_CHARS = [
@@ -92,13 +113,25 @@ export const TRACKING_FAMILIES: string[][] = [
   ['D', 'Đ']
 ];
 
-export function getTrackingFamilyMembers(char: string): string[] {
+export const UNACCENTED_BASE_CHARS = new Set([
+  'a', 'A', 'e', 'E', 'o', 'O', 'u', 'U', 'i', 'I', 'y', 'Y', 'd', 'D'
+]);
+
+export function isUnaccentedBaseChar(char: string): boolean {
+  if (!char) return false;
+  return UNACCENTED_BASE_CHARS.has(char);
+}
+
+export function getTrackingFamilyMembers(char: string, includeBaseChar: boolean = false): string[] {
   for (const family of TRACKING_FAMILIES) {
     if (family.includes(char)) {
+      if (!includeBaseChar) {
+        return family.filter((c) => !isUnaccentedBaseChar(c));
+      }
       return family;
     }
   }
-  return [char];
+  return isUnaccentedBaseChar(char) && !includeBaseChar ? [] : [char];
 }
 
 // Human-readable names for characters to make alignment/editing crystal clear
@@ -579,6 +612,232 @@ function getSubpaths(commands: any[]): any[][] {
     subpaths.push(current);
   }
   return subpaths;
+}
+
+/**
+ * Calculates the signed area of a 2D path contour in font coordinate space (Y-up).
+ * Positive area (>0) indicates Clockwise (CW) direction (outer contour in TrueType fonts).
+ * Negative area (<0) indicates Counter-Clockwise (CCW) direction (inner hole in TrueType fonts).
+ */
+export function getContourSignedArea(contour: any[]): number {
+  if (!contour || contour.length === 0) return 0;
+  
+  const points: { x: number; y: number }[] = [];
+  let curX = 0;
+  let curY = 0;
+
+  contour.forEach(cmd => {
+    if (cmd.type === 'M' || cmd.type === 'L') {
+      curX = cmd.x;
+      curY = cmd.y;
+      points.push({ x: curX, y: curY });
+    } else if (cmd.type === 'Q') {
+      for (let t = 0.1; t <= 1; t += 0.1) {
+        const mt = 1 - t;
+        const x = mt * mt * curX + 2 * mt * t * cmd.x1 + t * t * cmd.x;
+        const y = mt * mt * curY + 2 * mt * t * cmd.y1 + t * t * cmd.y;
+        points.push({ x, y });
+      }
+      curX = cmd.x;
+      curY = cmd.y;
+    } else if (cmd.type === 'C') {
+      for (let t = 0.1; t <= 1; t += 0.1) {
+        const mt = 1 - t;
+        const x = mt * mt * mt * curX + 3 * mt * mt * t * cmd.x1 + 3 * mt * t * t * cmd.x2 + t * t * t * cmd.x;
+        const y = mt * mt * mt * curY + 3 * mt * mt * t * cmd.y1 + 3 * mt * t * t * cmd.y2 + t * t * t * cmd.y;
+        points.push({ x, y });
+      }
+      curX = cmd.x;
+      curY = cmd.y;
+    }
+  });
+
+  if (points.length < 3) return 0;
+
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    area += (p1.x * p2.y - p2.x * p1.y);
+  }
+  return area / 2;
+}
+
+/**
+ * Reverses the winding direction of a single contour path (M...Z).
+ */
+export function reverseContour(contour: any[]): any[] {
+  if (!contour || contour.length <= 1) return contour;
+
+  const segments: any[] = [];
+  let hasZ = false;
+
+  contour.forEach(cmd => {
+    if (cmd.type === 'Z') {
+      hasZ = true;
+    } else {
+      segments.push(cmd);
+    }
+  });
+
+  if (segments.length <= 1) return contour;
+
+  const lastSeg = segments[segments.length - 1];
+  const reversed: any[] = [{ type: 'M', x: lastSeg.x, y: lastSeg.y }];
+
+  for (let i = segments.length - 1; i >= 1; i--) {
+    const curSeg = segments[i];
+    const prevSeg = segments[i - 1];
+    const destX = prevSeg.x;
+    const destY = prevSeg.y;
+
+    if (curSeg.type === 'L') {
+      reversed.push({ type: 'L', x: destX, y: destY });
+    } else if (curSeg.type === 'Q') {
+      reversed.push({
+        type: 'Q',
+        x1: curSeg.x1,
+        y1: curSeg.y1,
+        x: destX,
+        y: destY
+      });
+    } else if (curSeg.type === 'C') {
+      reversed.push({
+        type: 'C',
+        x1: curSeg.x2,
+        y1: curSeg.y2,
+        x2: curSeg.x1,
+        y2: curSeg.y1,
+        x: destX,
+        y: destY
+      });
+    }
+  }
+
+  if (hasZ) {
+    reversed.push({ type: 'Z' });
+  }
+
+  return reversed;
+}
+
+/**
+ * Tests if a point (x, y) is inside a contour using Ray-Casting algorithm.
+ */
+export function isPointInContour(x: number, y: number, contour: any[]): boolean {
+  const points: { x: number; y: number }[] = [];
+  contour.forEach(cmd => {
+    if (cmd.x !== undefined && cmd.y !== undefined) {
+      points.push({ x: cmd.x, y: cmd.y });
+    }
+  });
+
+  if (points.length < 3) return false;
+
+  let inside = false;
+  const n = points.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+
+    const intersect = ((yi > y) !== (yj > y)) &&
+        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Ensures all outer contours of a glyph match the target orientation (Clockwise for TrueType)
+ * and all inner hole contours have the opposite orientation (Counter-Clockwise).
+ * This eliminates boolean cutout holes when shapes overlap!
+ */
+export function orientContours(commands: any[], targetOuterClockwise: boolean = true): any[] {
+  const contours = getGlyphContours(commands);
+  if (contours.length === 0) return commands;
+
+  const resultCommands: any[] = [];
+
+  contours.forEach((contour, i) => {
+    const area = getContourSignedArea(contour);
+    if (Math.abs(area) < 1e-3) {
+      resultCommands.push(...contour);
+      return;
+    }
+
+    let containmentCount = 0;
+    const startCmd = contour[0];
+    if (startCmd && startCmd.x !== undefined && startCmd.y !== undefined) {
+      contours.forEach((other, j) => {
+        if (i !== j) {
+          if (isPointInContour(startCmd.x, startCmd.y, other)) {
+            containmentCount++;
+          }
+        }
+      });
+    }
+
+    const isOuter = (containmentCount % 2 === 0);
+    const shouldBeClockwise = isOuter ? targetOuterClockwise : !targetOuterClockwise;
+    const isCurrentlyClockwise = area > 0;
+
+    if (shouldBeClockwise !== isCurrentlyClockwise) {
+      resultCommands.push(...reverseContour(contour));
+    } else {
+      resultCommands.push(...contour);
+    }
+  });
+
+  return resultCommands;
+}
+
+/**
+ * Converts an array of opentype path commands to an SVG path string d="..."
+ */
+export function commandsToSvgPathD(cmds: any[]): string {
+  if (!cmds || cmds.length === 0) return '';
+  return cmds.map(cmd => {
+    if (cmd.type === 'M') return `M ${cmd.x} ${cmd.y}`;
+    if (cmd.type === 'L') return `L ${cmd.x} ${cmd.y}`;
+    if (cmd.type === 'Q') return `Q ${cmd.x1} ${cmd.y1} ${cmd.x} ${cmd.y}`;
+    if (cmd.type === 'C') return `C ${cmd.x1} ${cmd.y1} ${cmd.x2} ${cmd.y2} ${cmd.x} ${cmd.y}`;
+    if (cmd.type === 'Z') return `Z`;
+    return '';
+  }).join(' ');
+}
+
+/**
+ * Performs a 2D Boolean Union of two SVG paths using Paper.js.
+ * Merges overlapping boundaries into a single continuous outline, removing internal overlapping edges.
+ */
+export function unionSvgPaths(d1: string, d2: string): string {
+  if (!d1 || !d1.trim()) return d2 || '';
+  if (!d2 || !d2.trim()) return d1 || '';
+
+  try {
+    if (!paper.project) {
+      paper.setup(new paper.Size(4000, 4000));
+    }
+
+    const path1 = new paper.CompoundPath({ pathData: d1, insert: false });
+    const path2 = new paper.CompoundPath({ pathData: d2, insert: false });
+
+    const united = path1.unite(path2, { insert: false });
+    const resultD = united.pathData;
+
+    path1.remove();
+    path2.remove();
+    united.remove();
+
+    if (resultD && resultD.trim().length > 0) {
+      return resultD;
+    }
+    return d1 + ' ' + d2;
+  } catch (err) {
+    console.warn('Paper.js path union fallback:', err);
+    return d1 + ' ' + d2;
+  }
 }
 
 function getSubpathBBox(cmds: any[]) {
@@ -1263,6 +1522,28 @@ doubleAccentGroup.forEach(({ base, comp, chars }) => {
   });
 });
 
+export const BASE_CHAR_RECIPES: ComponentRecipe[] = [
+  { char: 'a', baseChar: 'a', components: [] },
+  { char: 'A', baseChar: 'A', components: [] },
+  { char: 'e', baseChar: 'e', components: [] },
+  { char: 'E', baseChar: 'E', components: [] },
+  { char: 'o', baseChar: 'o', components: [] },
+  { char: 'O', baseChar: 'O', components: [] },
+  { char: 'u', baseChar: 'u', components: [] },
+  { char: 'U', baseChar: 'U', components: [] },
+  { char: 'i', baseChar: 'i', components: [] },
+  { char: 'I', baseChar: 'I', components: [] },
+  { char: 'y', baseChar: 'y', components: [] },
+  { char: 'Y', baseChar: 'Y', components: [] },
+  { char: 'd', baseChar: 'd', components: [] },
+  { char: 'D', baseChar: 'D', components: [] }
+];
+
+export const STEP2_RECIPES: ComponentRecipe[] = [
+  ...BASE_CHAR_RECIPES,
+  ...VIETNAMESE_RECIPES
+];
+
 /**
  * Calculates the exact translation scaling and offsets required to automatically align a diacritic on top/bottom of a base glyph.
  * Uses bounding boxes for highly professional type design results.
@@ -1462,6 +1743,7 @@ export function composeGlyphPath(
     (overrides.offsetY !== undefined && overrides.offsetY !== 0) ||
     (overrides.scaleX !== undefined && overrides.scaleX !== 1.0) ||
     (overrides.scaleY !== undefined && overrides.scaleY !== 1.0) ||
+    (overrides.advanceWidthTweak !== undefined && overrides.advanceWidthTweak !== 0) ||
     overrides.comp1OffsetX !== undefined ||
     overrides.comp1OffsetY !== undefined ||
     overrides.comp2OffsetX !== undefined ||
@@ -1538,8 +1820,11 @@ export function composeGlyphPath(
 
   let baseGlyph = font.charToGlyph(baseCharToUse);
   
-  // For lowercase 'i', when combining with any diacritics, use the dotless 'i' glyph to remove the original dot
-  if (baseCharToUse === 'i' && componentsToUse.length > 0) {
+  // For lowercase 'i', remove the original dot only when adding top diacritics (ì, í, ỉ, ĩ),
+  // but keep the dot on 'i' when adding bottom diacritics like dot_below (ị)
+  const shouldRemoveDotOnI = baseCharToUse === 'i' && componentsToUse.some(comp => comp !== 'dot_below' && comp !== 'bar');
+
+  if (shouldRemoveDotOnI) {
     const dotlessGlyph = font.charToGlyph('ı');
     if (dotlessGlyph && dotlessGlyph.index > 0 && dotlessGlyph.name !== '.notdef') {
       baseGlyph = dotlessGlyph;
@@ -1563,15 +1848,15 @@ export function composeGlyphPath(
 
   const upm = font.unitsPerEm || 1000;
   
-  // Get base commands and programmatically strip dot if it's 'i' to guarantee dotless output
+  // Get base commands and programmatically strip dot if it's 'i' with top diacritics
   let baseCmds = baseGlyph.path.commands;
-  if (baseCharToUse === 'i' && componentsToUse.length > 0) {
+  if (shouldRemoveDotOnI) {
     baseCmds = removeDotFromICommands(baseCmds);
   }
 
   // Recalculate bounding box based on actual dotless commands if we stripped it
   const baseBBox = baseGlyph.getBoundingBox();
-  if (baseCharToUse === 'i' && componentsToUse.length > 0) {
+  if (shouldRemoveDotOnI) {
     const tightBox = getExactBoundingBox(baseCmds);
     baseBBox.x1 = tightBox.xMin;
     baseBBox.y1 = tightBox.yMin;
@@ -1579,17 +1864,29 @@ export function composeGlyphPath(
     baseBBox.y2 = tightBox.yMax;
   }
 
-  // Clone the base glyph path
-  const compositePath = new opentype.Path();
-  
-  // Re-push original glyph commands safely
-  baseCmds.forEach(cmd => {
-    if (cmd.type === 'M') compositePath.moveTo(cmd.x, cmd.y);
-    else if (cmd.type === 'L') compositePath.lineTo(cmd.x, cmd.y);
-    else if (cmd.type === 'Q') compositePath.quadTo(cmd.x1, cmd.y1, cmd.x, cmd.y);
-    else if (cmd.type === 'C') compositePath.curveTo(cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y);
-    else if (cmd.type === 'Z') compositePath.closePath();
-  });
+  // Determine target winding direction from base glyph (TrueType default: Clockwise >0)
+  const baseContours = getGlyphContours(baseCmds);
+  let targetOuterClockwise = true;
+  if (baseContours.length > 0) {
+    let maxArea = 0;
+    let maxAreaSigned = 0;
+    baseContours.forEach(c => {
+      const a = getContourSignedArea(c);
+      if (Math.abs(a) > maxArea) {
+        maxArea = Math.abs(a);
+        maxAreaSigned = a;
+      }
+    });
+    if (maxArea > 0) {
+      targetOuterClockwise = maxAreaSigned > 0;
+    }
+  }
+
+  // Ensure base commands contours have consistent outer orientation
+  baseCmds = orientContours(baseCmds, targetOuterClockwise);
+
+  // Initialize accumulated SVG path d string with base commands
+  let currentSvgD = commandsToSvgPathD(baseCmds);
 
   const isCapital = recipe.baseChar === recipe.baseChar.toUpperCase() && recipe.baseChar !== recipe.baseChar.toLowerCase();
   let previousBox: { xMin: number; yMin: number; xMax: number; yMax: number } | undefined = undefined;
@@ -1684,17 +1981,16 @@ export function composeGlyphPath(
       false // Already flipped Y in templateTransformed, don't flip again
     );
 
-    // Push diacritic commands to the composite path
-    finalCmds.forEach(cmd => {
-      if (cmd.type === 'M') compositePath.moveTo(cmd.x, cmd.y);
-      else if (cmd.type === 'L') compositePath.lineTo(cmd.x, cmd.y);
-      else if (cmd.type === 'Q') compositePath.quadTo(cmd.x1, cmd.y1, cmd.x, cmd.y);
-      else if (cmd.type === 'C') compositePath.curveTo(cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y);
-      else if (cmd.type === 'Z') compositePath.closePath();
-    });
+    // Ensure diacritic contour winding directions match target orientation
+    const orientedFinalCmds = orientContours(finalCmds, targetOuterClockwise);
+    const diaSvgD = commandsToSvgPathD(orientedFinalCmds);
+
+    // Merge diacritic with accumulated glyph path using 2D Boolean Union!
+    // This permanently eliminates boolean cutout holes when shapes overlap!
+    currentSvgD = unionSvgPaths(currentSvgD, diaSvgD);
 
     // Update previous bounding box to handle stacked double accents (only for circumflex & breve)
-    const composedDiaBBox = getExactBoundingBox(finalCmds);
+    const composedDiaBBox = getExactBoundingBox(orientedFinalCmds);
     if (diaId === 'circumflex' || diaId === 'breve') {
       previousBox = composedDiaBBox;
     } else {
@@ -1714,12 +2010,23 @@ export function composeGlyphPath(
     }
   });
 
+  // Convert final merged SVG path string back to opentype.Path
+  const finalMergedCmds = parseSvgPath(currentSvgD);
+  const compositePath = new opentype.Path();
+  finalMergedCmds.forEach(cmd => {
+    if (cmd.type === 'M') compositePath.moveTo(cmd.x, cmd.y);
+    else if (cmd.type === 'L') compositePath.lineTo(cmd.x, cmd.y);
+    else if (cmd.type === 'Q') compositePath.quadTo(cmd.x1, cmd.y1, cmd.x, cmd.y);
+    else if (cmd.type === 'C') compositePath.curveTo(cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y);
+    else if (cmd.type === 'Z') compositePath.closePath();
+  });
+
   // Calculate advance width (tracking)
   let advanceWidth = baseGlyph.advanceWidth;
   if (autoHornAdvanceWidthTweak > 0) {
     advanceWidth += autoHornAdvanceWidthTweak;
   }
-  if (overrides) {
+  if (overrides && overrides.advanceWidthTweak !== undefined) {
     advanceWidth += overrides.advanceWidthTweak;
   }
 

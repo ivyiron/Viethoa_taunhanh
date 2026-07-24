@@ -4,20 +4,25 @@ import { FontUploader } from './components/FontUploader';
 import { DiacriticStudio } from './components/DiacriticStudio';
 import { AutoCompositeBoard } from './components/AutoCompositeBoard';
 import { FontPlayground } from './components/FontPlayground';
-import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata } from './types';
+import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata, VietnameseProjectFile } from './types';
 import { 
   DEFAULT_DIACRITICS, 
   DEFAULT_AUTO_RULES, 
   VIETNAMESE_RECIPES, 
+  STEP2_RECIPES,
   getTrackingFamilyMembers,
+  isUnaccentedBaseChar,
   composeGlyphPath, 
   ensureKerningPairsPopulated, 
   injectAdvancedLayoutTables, 
   buildKernTable,
   findCandidateGlyph,
-  extractSvgFromGlyph
+  extractSvgFromGlyph,
+  arrayBufferToBase64,
+  base64ToArrayBuffer
 } from './utils';
-import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2, FolderDown, FolderOpen } from 'lucide-react';
+
 
 export default function App() {
   const [originalFont, setOriginalFont] = useState<opentype.Font | null>(null);
@@ -141,7 +146,7 @@ export default function App() {
 
     // Initialize individual overrides to empty defaults
     const initialOverrides: Record<string, GlyphOverrideState> = {};
-    VIETNAMESE_RECIPES.forEach((recipe) => {
+    STEP2_RECIPES.forEach((recipe) => {
       initialOverrides[recipe.char] = {
         char: recipe.char,
         offsetX: 0,
@@ -201,11 +206,12 @@ export default function App() {
 
       next[char] = { ...current, ...updated };
 
-      // If advanceWidthTweak (tracking) is modified, propagate to all related family members
+      // If advanceWidthTweak (tracking) is modified, propagate to all related family members EXCEPT unaccented base characters
       if (updated.advanceWidthTweak !== undefined) {
-        const familyMembers = getTrackingFamilyMembers(char);
+        const tweakVal = updated.advanceWidthTweak;
+        const familyMembers = getTrackingFamilyMembers(char, false);
         familyMembers.forEach((fChar) => {
-          if (fChar !== char) {
+          if (fChar !== char && !isUnaccentedBaseChar(fChar)) {
             const fCurrent = next[fChar] || {
               char: fChar,
               offsetX: 0,
@@ -217,7 +223,7 @@ export default function App() {
             };
             next[fChar] = {
               ...fCurrent,
-              advanceWidthTweak: updated.advanceWidthTweak!
+              advanceWidthTweak: tweakVal
             };
           }
         });
@@ -281,7 +287,7 @@ export default function App() {
       const charToGlyphIndexMap: Record<string, number> = {};
       let simulatedGlyphsLength = font.glyphs.length;
       
-      VIETNAMESE_RECIPES.forEach(recipe => {
+      STEP2_RECIPES.forEach(recipe => {
         const existingIndex = font.charToGlyphIndex(recipe.char);
         if (existingIndex > 0) {
           charToGlyphIndexMap[recipe.char] = existingIndex;
@@ -300,20 +306,27 @@ export default function App() {
 
       const charHornInfo: Record<string, { yMin: number; yMax: number; excessRight: number }> = {};
 
-      // Compose and inject all 134 Vietnamese composite glyphs
-      VIETNAMESE_RECIPES.forEach(recipe => {
+      // Compose and inject all Vietnamese composite glyphs & base character tracking tweaks
+      STEP2_RECIPES.forEach(recipe => {
         const unicode = recipe.char.charCodeAt(0);
         const existingIndex = font.charToGlyphIndex(recipe.char);
         const existingGlyph = existingIndex > 0 ? font.glyphs.get(existingIndex) : null;
         const hasOriginalPath = existingGlyph && existingGlyph.path && existingGlyph.path.commands && existingGlyph.path.commands.length > 0;
 
-        // If character already exists natively in the font and preserve option is enabled, DO NOT overwrite it!
-        if (preserveExistingGlyphs && hasOriginalPath) {
+        const isBaseChar = recipe.components.length === 0;
+
+        // If character already exists natively in the font and preserve option is enabled, DO NOT overwrite it
+        if (!isBaseChar && preserveExistingGlyphs && hasOriginalPath) {
           return;
         }
 
         const override = overrides[recipe.char];
         
+        // If it's a base character with no tracking tweak, do not overwrite font's native glyph
+        if (isBaseChar && (!override || !override.advanceWidthTweak)) {
+          return;
+        }
+
         // Bake composite path and compute customized tracking
         const { path, advanceWidth, hornInfo } = composeGlyphPath(font, recipe, templates, rules, override, preserveExistingGlyphs);
         if (hornInfo) {
@@ -472,6 +485,9 @@ export default function App() {
       // byte-for-byte from the original font buffer, this bypasses the buggy serializer while 
       // completely preserving original kerning, ligatures, and features!
       if (font.tables) {
+        if (font.tables.head) {
+          font.tables.head.flags |= 0x0040; // Set TrueType OVERLAP_SIMPLE flag (bit 6) for composite glyph rasterization
+        }
         delete font.tables.gpos;
         delete font.tables.gsub;
         delete font.tables.gdef;
@@ -510,6 +526,116 @@ export default function App() {
       setCompiling(false);
     }
   }, [originalFont, rawFontBuffer, templates, rules, overrides, customFamilyName, customSubfamilyName]);
+
+  // Project Save Handler (.ftn)
+  const handleSaveProject = useCallback(() => {
+    if (!rawFontBuffer || !metadata || !filename) {
+      setAppError('Không tìm thấy dữ liệu font để lưu file dự án!');
+      return;
+    }
+
+    try {
+      const base64Buffer = arrayBufferToBase64(rawFontBuffer);
+      const projectData: VietnameseProjectFile = {
+        ftnVersion: '1.0',
+        appName: 'VietHoaTauNhanh',
+        savedAt: new Date().toISOString(),
+        filename: filename,
+        fontMetadata: metadata,
+        rawFontBufferBase64: base64Buffer,
+        customFamilyName: customFamilyName,
+        customSubfamilyName: customSubfamilyName,
+        preserveExistingGlyphs: preserveExistingGlyphs,
+        templates: templates,
+        rules: rules,
+        overrides: overrides,
+      };
+
+      const jsonString = JSON.stringify(projectData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+
+      const cleanFamily = (customFamilyName || metadata.family || 'du_an').replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.download = `${cleanFamily}_VietHoa.ftn`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setAppSuccess('Đã lưu file dự án (.ftn) thành công! Bạn có thể lưu lại và nạp lại vào lần làm việc sau.');
+    } catch (err: any) {
+      console.error(err);
+      setAppError('Lỗi khi xuất file dự án: ' + (err.message || 'Không thể đóng gói dữ liệu'));
+    }
+  }, [rawFontBuffer, metadata, filename, customFamilyName, customSubfamilyName, preserveExistingGlyphs, templates, rules, overrides]);
+
+  // Project Load Handler (.ftn)
+  const handleLoadProjectData = useCallback((projectData: VietnameseProjectFile) => {
+    try {
+      if (!projectData.rawFontBufferBase64) {
+        throw new Error('Dữ liệu font trong file .ftn bị trống.');
+      }
+
+      const buffer = base64ToArrayBuffer(projectData.rawFontBufferBase64);
+      const font = opentype.parse(buffer);
+
+      setOriginalFont(font);
+      setRawFontBuffer(buffer);
+      setFilename(projectData.filename || 'font_project.otf');
+      setMetadata(projectData.fontMetadata);
+
+      if (projectData.customFamilyName !== undefined) {
+        setCustomFamilyName(projectData.customFamilyName);
+      }
+      if (projectData.customSubfamilyName !== undefined) {
+        setCustomSubfamilyName(projectData.customSubfamilyName);
+      }
+      if (projectData.preserveExistingGlyphs !== undefined) {
+        setPreserveExistingGlyphs(projectData.preserveExistingGlyphs);
+      }
+
+      if (projectData.templates) {
+        const mergedTemplates: Record<string, DiacriticTemplate> = {};
+        DEFAULT_DIACRITICS.forEach((dia) => {
+          mergedTemplates[dia.id] = { ...dia };
+        });
+        Object.keys(projectData.templates).forEach((key) => {
+          if (isNaN(Number(key)) && projectData.templates[key]) {
+            mergedTemplates[key] = projectData.templates[key];
+          }
+        });
+        setTemplates(mergedTemplates);
+      }
+      if (projectData.rules) {
+        setRules({ ...DEFAULT_AUTO_RULES, ...projectData.rules });
+      }
+      if (projectData.overrides) {
+        setOverrides(projectData.overrides);
+      }
+
+      // Recalculate existing glyph info
+      let count = 0;
+      const samples: string[] = [];
+      VIETNAMESE_RECIPES.forEach((recipe) => {
+        const gIndex = font.charToGlyphIndex(recipe.char);
+        if (gIndex > 0) {
+          const glyph = font.glyphs.get(gIndex);
+          if (glyph && ((glyph.path && glyph.path.commands && glyph.path.commands.length > 0) || (glyph.numberOfContours && glyph.numberOfContours > 0))) {
+            count++;
+            if (samples.length < 10) samples.push(recipe.char);
+          }
+        }
+      });
+      setExistingGlyphInfo({ count, total: 134, samples });
+
+      setCompiledBuffer(null);
+      setAppSuccess(`Đã nạp thành công file dự án "${projectData.filename}" (.ftn)!`);
+    } catch (err: any) {
+      console.error(err);
+      setAppError('Không thể mở file dự án .ftn: ' + (err.message || 'File hỏng hoặc không đúng định dạng.'));
+    }
+  }, []);
+
 
   return (
     <div className="min-h-screen bg-neutral-50/40 text-neutral-900 font-sans pb-16">
@@ -573,11 +699,13 @@ export default function App() {
         <section id="upload-step-section">
           <FontUploader
             onFontLoaded={handleFontLoaded}
+            onProjectLoaded={handleLoadProjectData}
             onReset={handleReset}
             metadata={metadata}
             filename={filename}
           />
         </section>
+
 
         {originalFont && metadata && (
           <>
@@ -764,6 +892,15 @@ export default function App() {
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${compiling ? 'animate-spin' : ''}`} />
                     Cập nhật & Chạy thử
+                  </button>
+
+                  <button
+                    id="btn-save-project"
+                    onClick={handleSaveProject}
+                    className="flex-1 sm:flex-none py-2.5 px-4 font-bold text-xs rounded-lg hover:bg-emerald-600 bg-emerald-700 text-white flex items-center justify-center gap-1.5 transition shadow-xs cursor-pointer border border-emerald-500/30"
+                  >
+                    <FolderDown className="w-4 h-4 text-emerald-200" />
+                    Lưu Tệp Dự Án (.ftn)
                   </button>
 
                   <button

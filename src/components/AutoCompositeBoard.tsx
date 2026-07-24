@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as opentype from 'opentype.js';
 import { Sliders, Sparkles, Filter, CheckCircle, ChevronRight, HelpCircle, Info, Move, Settings, Check } from 'lucide-react';
 import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata } from '../types';
-import { VIETNAMESE_RECIPES, composeGlyphPath, ComponentRecipe, getTrackingFamilyMembers } from '../utils';
+import { STEP2_RECIPES, isUnaccentedBaseChar, composeGlyphPath, ComponentRecipe, getTrackingFamilyMembers } from '../utils';
 
 const getDiaName = (id: string): string => {
   const names: Record<string, string> = {
@@ -208,11 +208,11 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
   preserveExistingGlyphs = true
 }) => {
   const [selectedChar, setSelectedChar] = useState<string>('á');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'lowercase' | 'uppercase' | 'a_group' | 'e_group' | 'o_group' | 'u_group' | 'other_group' | 'edited'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'base_chars' | 'lowercase' | 'uppercase' | 'a_group' | 'e_group' | 'o_group' | 'u_group' | 'other_group' | 'edited'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const activeRecipe = useMemo(() => {
-    return VIETNAMESE_RECIPES.find((r) => r.char === selectedChar) || VIETNAMESE_RECIPES[0];
+    return STEP2_RECIPES.find((r) => r.char === selectedChar) || STEP2_RECIPES[0];
   }, [selectedChar]);
 
   const activeOverride = overrides[selectedChar] || {
@@ -244,7 +244,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
     if (onBatchUpdateOverrides) {
       onBatchUpdateOverrides((prev) => {
         const next = { ...prev };
-        VIETNAMESE_RECIPES.forEach((recipe) => {
+        STEP2_RECIPES.forEach((recipe) => {
           const ovr = next[recipe.char];
           if (isGlyphCustomized(ovr)) {
             next[recipe.char] = {
@@ -256,7 +256,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
         return next;
       });
     } else {
-      VIETNAMESE_RECIPES.forEach((recipe) => {
+      STEP2_RECIPES.forEach((recipe) => {
         const ovr = overrides[recipe.char];
         if (isGlyphCustomized(ovr)) {
           onUpdateOverride(recipe.char, { isCompleted: true });
@@ -269,7 +269,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
     if (onBatchUpdateOverrides) {
       onBatchUpdateOverrides((prev) => {
         const next = { ...prev };
-        VIETNAMESE_RECIPES.forEach((recipe) => {
+        STEP2_RECIPES.forEach((recipe) => {
           const ovr = next[recipe.char] || {
             char: recipe.char,
             offsetX: 0,
@@ -288,7 +288,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
 
   // Filter recipes based on tab and query
   const filteredRecipes = useMemo(() => {
-    return VIETNAMESE_RECIPES.filter((recipe) => {
+    return STEP2_RECIPES.filter((recipe) => {
       // 1. Filter by Search Query
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -298,6 +298,9 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
       }
 
       // 2. Filter by tab selector
+      if (activeFilter === 'base_chars') {
+        return isUnaccentedBaseChar(recipe.char);
+      }
       if (activeFilter === 'lowercase') {
         return recipe.char === recipe.char.toLowerCase();
       }
@@ -328,11 +331,11 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
   }, [activeFilter, searchQuery, overrides]);
 
   const stats = useMemo(() => {
-    const total = VIETNAMESE_RECIPES.length;
+    const total = STEP2_RECIPES.length;
     let completed = 0;
     let customized = 0;
 
-    VIETNAMESE_RECIPES.forEach((r) => {
+    STEP2_RECIPES.forEach((r) => {
       const ovr = overrides[r.char];
       if (ovr?.isCompleted) completed++;
       if (isGlyphCustomized(ovr)) customized++;
@@ -507,7 +510,8 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
         {/* Filters Carousel */}
         <div className="flex flex-wrap gap-1.5 overflow-x-auto w-full md:w-auto">
           {[
-            { id: 'all', label: 'Tất cả (134)' },
+            { id: 'all', label: `Tất cả (${STEP2_RECIPES.length})` },
+            { id: 'base_chars', label: 'Ký tự gốc (14)' },
             { id: 'lowercase', label: 'Chữ thường' },
             { id: 'uppercase', label: 'Chữ hoa' },
             { id: 'a_group', label: 'Nhóm chữ A/Ă/Â' },
@@ -637,7 +641,12 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
           <div className="border border-neutral-100 rounded-xl bg-neutral-50 overflow-hidden flex flex-col items-center justify-center">
             <canvas ref={inspectorCanvasRef} width={400} height={300} className="w-full aspect-[4/3] block" />
             <div className="w-full bg-neutral-100/60 p-2 border-t border-neutral-200/50 flex justify-between text-[9px] font-mono text-neutral-500">
-              <span>Công thức ghép: {activeRecipe?.components.join(' + ')}</span>
+              <span>
+                Công thức ghép:{' '}
+                {activeRecipe?.components && activeRecipe.components.length > 0
+                  ? activeRecipe.components.map(getDiaName).join(' + ')
+                  : 'Ký tự gốc (không có dấu)'}
+              </span>
               <span>Base: {activeRecipe?.baseChar}</span>
             </div>
           </div>
@@ -680,7 +689,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
               />
               <p className="text-[9px] text-indigo-600/90 leading-snug">
                 * Thay đổi tracking sẽ <strong>tự động đồng bộ</strong> cho cả bộ chữ liên quan:{' '}
-                <span className="font-bold underline">{getTrackingFamilyMembers(selectedChar).join(', ')}</span>.
+                <span className="font-bold underline">{getTrackingFamilyMembers(selectedChar, false).join(', ') || 'Không có'}</span>.
               </p>
             </div>
 

@@ -1,14 +1,16 @@
 import React, { useRef, useState } from 'react';
 import * as opentype from 'opentype.js';
-import { Upload, FileType, CheckCircle, Info } from 'lucide-react';
-import { FontMetadata } from '../types';
+import { Upload, FileType, CheckCircle, Info, FolderOpen } from 'lucide-react';
+import { FontMetadata, VietnameseProjectFile } from '../types';
 
 interface FontUploaderProps {
   onFontLoaded: (font: opentype.Font, filename: string, metadata: FontMetadata, rawBuffer: ArrayBuffer) => void;
+  onProjectLoaded?: (projectData: VietnameseProjectFile) => void;
   onReset: () => void;
   metadata: FontMetadata | null;
   filename: string | null;
 }
+
 
 // Helper to safely retrieve localized font name strings across flat and platform-specific formats in opentype.js
 const getFontName = (font: any, key: string, defaultValue: string): string => {
@@ -56,6 +58,7 @@ const getFontName = (font: any, key: string, defaultValue: string): string => {
 
 export const FontUploader: React.FC<FontUploaderProps> = ({
   onFontLoaded,
+  onProjectLoaded,
   onReset,
   metadata,
   filename
@@ -64,10 +67,46 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
+    if (file.name.endsWith('.ftn')) {
+      setLoading(true);
+      setError(null);
+      try {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const text = e.target?.result as string;
+            const projectData = JSON.parse(text) as VietnameseProjectFile;
+            if (!projectData || !projectData.rawFontBufferBase64) {
+              throw new Error('Cấu trúc file .ftn không đúng định dạng dự án Việt hóa.');
+            }
+            if (onProjectLoaded) {
+              onProjectLoaded(projectData);
+            }
+          } catch (parseErr: any) {
+            console.error(parseErr);
+            setError('Lỗi khi đọc file dự án .ftn: ' + (parseErr.message || 'File hỏng hoặc không đúng định dạng.'));
+          } finally {
+            setLoading(false);
+          }
+        };
+        reader.onerror = () => {
+          setError('Đã xảy ra lỗi khi đọc file dự án.');
+          setLoading(false);
+        };
+        reader.readAsText(file);
+      } catch (err) {
+        console.error(err);
+        setError('Đã xảy ra lỗi không xác định.');
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!file.name.endsWith('.otf') && !file.name.endsWith('.ttf')) {
-      setError('Vui lòng tải lên file font định dạng .otf hoặc .ttf');
+      setError('Vui lòng tải lên file font định dạng .otf, .ttf hoặc file dự án .ftn');
       return;
     }
 
@@ -129,6 +168,7 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
     }
   };
 
+
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
@@ -156,6 +196,14 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
 
   return (
     <div className="w-full">
+      <input
+        type="file"
+        ref={projectInputRef}
+        onChange={onFileChange}
+        accept=".ftn"
+        className="hidden"
+      />
+
       {!metadata ? (
         <div
           id="font-dropzone"
@@ -173,7 +221,7 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
             type="file"
             ref={fileInputRef}
             onChange={onFileChange}
-            accept=".otf,.ttf"
+            accept=".otf,.ttf,.ftn"
             className="hidden"
           />
           
@@ -182,15 +230,28 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
           </div>
 
           <h3 className="text-lg font-medium text-neutral-800 dark:text-neutral-200 mb-1">
-            {loading ? 'Đang phân tích font...' : 'Tải lên font của bạn'}
+            {loading ? 'Đang phân tích...' : 'Tải lên font hoặc mở file dự án'}
           </h3>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mb-4">
-            Kéo và thả file font <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">.OTF</span> hoặc <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">.TTF</span> của bạn vào đây, hoặc click để duyệt file.
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 max-w-md mb-4">
+            Kéo & thả file font <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">.OTF</span>, <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">.TTF</span> hoặc tệp dự án <span className="font-mono font-bold text-amber-600 dark:text-amber-400">.FTN</span> vào đây, hoặc click để chọn file.
           </p>
 
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-50 dark:bg-neutral-900 rounded-full border border-neutral-100 text-xs text-neutral-500">
-            <FileType className="w-3.5 h-3.5" />
-            <span>Hỗ trợ OpenType & TrueType Font</span>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-50 dark:bg-neutral-900 rounded-full border border-neutral-100 text-xs text-neutral-500">
+              <FileType className="w-3.5 h-3.5" />
+              <span>Font OpenType & TrueType (.otf, .ttf)</span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                projectInputRef.current?.click();
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-full border border-amber-200/80 text-xs transition cursor-pointer"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+              <span>Nạp file dự án (.ftn)</span>
+            </button>
           </div>
 
           {error && (
@@ -215,14 +276,25 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
               </div>
             </div>
             
-            <button
-              id="btn-font-reset"
-              onClick={onReset}
-              className="px-4 py-2 text-sm font-medium border border-neutral-200 hover:bg-neutral-50 text-neutral-700 rounded-lg transition-all duration-200"
-            >
-              Chọn font khác
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => projectInputRef.current?.click()}
+                className="px-3.5 py-2 text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+                Mở dự án khác (.ftn)
+              </button>
+              <button
+                id="btn-font-reset"
+                onClick={onReset}
+                className="px-4 py-2 text-xs font-semibold border border-neutral-200 hover:bg-neutral-50 text-neutral-700 rounded-lg transition duration-200 cursor-pointer"
+              >
+                Chọn font khác
+              </button>
+            </div>
           </div>
+
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-3.5 bg-neutral-50/50 rounded-lg border border-neutral-100/50">

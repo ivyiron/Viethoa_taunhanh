@@ -1510,27 +1510,30 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
         <div className="lg:col-span-3 flex flex-col gap-2">
           <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-1 px-1">Danh sách Dấu mẫu (9)</span>
           <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
-            {(Object.values(templates) as DiacriticTemplate[]).map((dia) => (
-              <button
-                key={dia.id}
-                onClick={() => {
-                  setActiveDiaId(dia.id);
-                  if (dia.id === 'bar' || dia.id === 'horn') {
-                    // Horns & Bars are best tweaked with regular vowels preview, but custom logic applies
-                  }
-                }}
-                className={`flex flex-col items-start p-3 rounded-xl border text-left transition ${
-                  activeDiaId === dia.id
-                    ? 'border-neutral-950 bg-neutral-950 text-white shadow-xs'
-                    : 'border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 hover:border-neutral-300'
-                }`}
-              >
-                <span className="text-xs font-bold">{dia.name}</span>
-                <span className="text-[10px] opacity-70 font-mono mt-1 truncate max-w-full">
-                  {dia.svgPath ? 'Đã thiết lập vector' : 'Chưa có nét'}
-                </span>
-              </button>
-            ))}
+            {DEFAULT_DIACRITICS.map((defaultDia) => {
+              const dia = templates[defaultDia.id] || defaultDia;
+              return (
+                <button
+                  key={dia.id}
+                  onClick={() => {
+                    setActiveDiaId(dia.id);
+                    if (dia.id === 'bar' || dia.id === 'horn') {
+                      // Horns & Bars are best tweaked with regular vowels preview, but custom logic applies
+                    }
+                  }}
+                  className={`flex flex-col items-start p-3 rounded-xl border text-left transition ${
+                    activeDiaId === dia.id
+                      ? 'border-neutral-950 bg-neutral-950 text-white shadow-xs'
+                      : 'border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 hover:border-neutral-300'
+                  }`}
+                >
+                  <span className="text-xs font-bold">{dia.name}</span>
+                  <span className="text-[10px] opacity-70 font-mono mt-1 truncate max-w-full">
+                    {dia.svgPath ? 'Đã thiết lập vector' : 'Chưa có nét'}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 

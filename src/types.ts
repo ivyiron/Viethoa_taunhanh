@@ -68,3 +68,18 @@ export interface FontMetadata {
   xHeight: number;
   totalGlyphs: number;
 }
+
+export interface VietnameseProjectFile {
+  ftnVersion: string;
+  appName: string;
+  savedAt: string;
+  filename: string;
+  fontMetadata: FontMetadata;
+  rawFontBufferBase64: string;
+  customFamilyName?: string;
+  customSubfamilyName?: string;
+  preserveExistingGlyphs?: boolean;
+  templates: Record<string, DiacriticTemplate>;
+  rules: AutoPositionRules;
+  overrides: Record<string, GlyphOverrideState>;
+}

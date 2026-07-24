@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Type, AlignLeft, AlignCenter, AlignRight, Moon, Sun, Sparkles } from 'lucide-react';
-import * as opentype from 'opentype.js';
 
 interface FontPlaygroundProps {
   fontBuffer: ArrayBuffer | null;
@@ -23,22 +22,6 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
   const [fontRegistered, setFontRegistered] = useState(false);
   const [activeFamilyName, setActiveFamilyName] = useState(fontFamilyName);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [parsedFont, setParsedFont] = useState<any>(null);
-
-  // Parse fontBuffer to a usable opentype.js Font instance
-  useEffect(() => {
-    if (!fontBuffer) {
-      setParsedFont(null);
-      return;
-    }
-    try {
-      const parsed = opentype.parse(fontBuffer.slice(0));
-      setParsedFont(parsed);
-    } catch (e) {
-      console.error('Failed to parse fontBuffer in FontPlayground:', e);
-      setParsedFont(null);
-    }
-  }, [fontBuffer]);
 
   // Register font face in the browser
   useEffect(() => {
@@ -84,141 +67,17 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
     registerFont();
   }, [fontBuffer, fontFamilyName]);
 
-  // Render the text word-by-word, character-by-character with exact kerning offsets
-  const renderTextWithKerning = () => {
-    if (!inputText) return null;
-    if (!parsedFont) {
-      return <span>{inputText}</span>;
-    }
-
-    const lines = inputText.split('\n');
-    const lineElements: React.ReactNode[] = [];
-
-    // Scale factor to convert font design units (usually 1000 or 2048 unitsPerEm) to pixels
-    const unitsPerEm = parsedFont.unitsPerEm || 1000;
-    const scale = fontSize / unitsPerEm;
-
-    lines.forEach((line, lineIdx) => {
-      // Split the line into segments of words and spaces
-      const tokens: string[] = [];
-      let currentToken = '';
-      
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        if (char === ' ') {
-          if (currentToken) {
-            tokens.push(currentToken);
-            currentToken = '';
-          }
-          tokens.push(' ');
-        } else {
-          currentToken += char;
-        }
-      }
-      if (currentToken) {
-        tokens.push(currentToken);
-      }
-
-      // Calculate the kerning value for each character pair in the line
-      const charKerning: number[] = [];
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        const nextChar = line[i + 1];
-        let kernValue = 0;
-        if (nextChar) {
-          const leftIndex = parsedFont.charToGlyphIndex(char);
-          const rightIndex = parsedFont.charToGlyphIndex(nextChar);
-          if (leftIndex > 0 && rightIndex > 0) {
-            const pairKey = `${leftIndex},${rightIndex}`;
-            if (parsedFont.kerningPairs && parsedFont.kerningPairs[pairKey] !== undefined) {
-              kernValue = parsedFont.kerningPairs[pairKey];
-            } else {
-              kernValue = parsedFont.getKerningValue(leftIndex, rightIndex) || 0;
-            }
-          }
-        }
-        charKerning.push(kernValue * scale);
-      }
-
-      const wordElements: React.ReactNode[] = [];
-      let charIdxInLine = 0;
-
-      tokens.forEach((token, tokenIdx) => {
-        if (token === ' ') {
-          const kernPx = charKerning[charIdxInLine];
-          wordElements.push(
-            <span
-              key={`space-${tokenIdx}`}
-              style={{
-                marginRight: kernPx !== 0 ? `${kernPx}px` : undefined,
-                display: 'inline-block',
-                whiteSpace: 'pre'
-              }}
-            >
-              {' '}
-            </span>
-          );
-          charIdxInLine++;
-        } else {
-          const wordChars = Array.from(token);
-          const wordCharElements = wordChars.map((char, cIdx) => {
-            const globalIdx = charIdxInLine + cIdx;
-            const kernPx = charKerning[globalIdx];
-            return (
-              <span
-                key={`char-${cIdx}`}
-                style={{
-                  marginRight: kernPx !== 0 ? `${kernPx}px` : undefined,
-                  display: 'inline-block',
-                  whiteSpace: 'pre'
-                }}
-              >
-                {char}
-              </span>
-            );
-          });
-          
-          wordElements.push(
-            <span
-              key={`word-${tokenIdx}`}
-              className="inline-block"
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              {wordCharElements}
-            </span>
-          );
-          charIdxInLine += token.length;
-        }
-      });
-
-      lineElements.push(
-        <div 
-          key={`line-${lineIdx}`} 
-          className="min-h-[1.2em] w-full" 
-          style={{ 
-            lineHeight: lineHeight,
-            textAlign: textAlign
-          }}
-        >
-          {wordElements.length > 0 ? wordElements : <br />}
-        </div>
-      );
-    });
-
-    return <div className="w-full" style={{ textAlign: textAlign }}>{lineElements}</div>;
-  };
-
   const getThemeClasses = () => {
     switch (bgTheme) {
       case 'dark':
-        return 'bg-neutral-900 text-neutral-100 border-neutral-800';
+        return 'bg-neutral-900 text-neutral-100 border-neutral-800 placeholder:text-neutral-600';
       case 'black':
-        return 'bg-black text-amber-200 border-neutral-900';
+        return 'bg-black text-amber-200 border-neutral-900 placeholder:text-neutral-700';
       case 'paper':
-        return 'bg-[#FAF6EE] text-[#2C2621] border-[#EADFCB]';
+        return 'bg-[#FAF6EE] text-[#2C2621] border-[#EADFCB] placeholder:text-neutral-400';
       case 'light':
       default:
-        return 'bg-neutral-50 text-neutral-900 border-neutral-200';
+        return 'bg-neutral-50 text-neutral-900 border-neutral-200 placeholder:text-neutral-400';
     }
   };
 
@@ -230,7 +89,7 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
         return 'min-h-[200px] h-auto';
       case 'medium':
       default:
-        return 'min-h-[240px] h-[240px]';
+        return 'min-h-[260px] h-[260px]';
     }
   };
 
@@ -244,17 +103,20 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
             <Type className="w-4.5 h-4.5 text-amber-400" />
           </span>
           <div>
-            <h3 className="text-base font-extrabold text-neutral-950 tracking-tight">
+            <h3 className="text-base font-extrabold text-neutral-950 tracking-tight flex items-center gap-2">
               Trình Gõ Thử Font (Test Font)
+              <span className="text-[11px] font-normal text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-md font-mono">
+                {inputText.length} ký tự
+              </span>
             </h3>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Kiểm tra trực tiếp kết quả Việt hóa, Kerning và khoảng cách hiển thị thực tế trên khung làm việc tràn màn hình.
+              Gõ trực tiếp văn bản vào khung bên dưới để kiểm tra hiển thị thực tế, Việt hóa và khoảng cách chữ.
             </p>
           </div>
         </div>
 
         {/* Status Indicator */}
-        <div>
+        <div className="flex items-center gap-2">
           {fontRegistered ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 text-xs font-bold rounded-xl border border-green-200/80">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-ping"></span>
@@ -418,86 +280,54 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
           <span className="text-xs text-neutral-500 font-bold shrink-0">Mẫu văn bản:</span>
           <button
             onClick={() => setInputText('Chưng cất rượu nếp thơm lừng hoặc giã giò lụa truyền thống. Đất nước Việt Nam vạn dặm gấm vóc, núi sông hùng vĩ chứa chan nghĩa tình. 1234567890!')}
-            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition cursor-pointer"
           >
             Mẫu câu tiêu chuẩn
           </button>
           <button
             onClick={() => setInputText('ÁĂÂÈÉÊÌÍÒÓÔƠÙÚƯÝ Đ / áăâèéêìíòóôơùúưý đ\nảẻỉỏủỷ ãẽĩõũỹ ạẹịọụỵ\nầấẩẫậ ằắẳẵặ ềếểễệ ồốổỗộ ờớởỡợ ừứửữự')}
-            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition cursor-pointer"
           >
             Toàn bộ 134 ký tự Việt
           </button>
           <button
             onClick={() => setInputText('Trăm năm trong cõi người ta, chữ tài chữ mệnh khéo là ghét nhau.\nTrải qua một cuộc bể dâu, những điều trông thấy mà đau đớn lòng.\nLạ gì bỉ sắc tư phong, trời xanh quen thói má hồng đánh ghen.')}
-            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition cursor-pointer"
           >
             Đoạn văn Truyện Kiều
           </button>
           <button
             onClick={() => setInputText('VIỆT NAM HÙNG CƯỜNG - TỰ DO - HẠNH PHÚC 2026')}
-            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition cursor-pointer"
           >
             Tiêu đề In Hoa
           </button>
           <button
             onClick={() => setInputText('AV TA Va To Tr Ch Gi Qu Yo Fo ÁV ÀV ÂV')}
-            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition"
+            className="text-xs bg-white border border-neutral-200 hover:border-neutral-300 hover:bg-neutral-100 text-neutral-800 font-semibold py-1 px-3 rounded-lg shrink-0 shadow-2xs transition cursor-pointer"
           >
             Kiểm tra Kerning Cặp đôi
           </button>
         </div>
       </div>
 
-      {/* Live Workspace Layout (Full Width Permanent) */}
-      <div className="space-y-4">
-        
-        {/* Input Area (Full width) */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center">
-            <label className="text-xs font-extrabold text-neutral-800 block">
-              Nhập văn bản kiểm thử:
-            </label>
-            <span className="text-[11px] text-neutral-400 font-mono">
-              {inputText.length} ký tự
-            </span>
-          </div>
-          <textarea
-            id="playground-input-area"
-            rows={2}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Gõ đoạn văn bản kiểm tra độ giãn chữ, khoảng cách và độ cao..."
-            className="w-full text-sm p-3.5 border border-neutral-200 focus:outline-hidden focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 rounded-xl bg-neutral-50/50 text-neutral-900 font-medium"
-          />
-        </div>
-
-        {/* Full Width Live View Area */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center">
-            <label className="text-xs font-extrabold text-neutral-950 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Khu vực hiển thị thực tế (Full Width - Tràn màn hình):
-            </label>
-            <span className="text-[11px] text-neutral-400">
-              (Kéo góc dưới bên phải để mở rộng chiều cao)
-            </span>
-          </div>
-
-          <div 
-            id="playground-rendering-box"
-            className={`w-full ${getHeightStyle()} p-6 border rounded-2xl overflow-y-auto break-words resize-y shadow-inner text-left transition-colors duration-200 ${getThemeClasses()}`}
-            style={{
-              fontFamily: fontRegistered ? `"${activeFamilyName}", sans-serif` : 'sans-serif',
-              fontSize: `${fontSize}px`,
-              lineHeight: lineHeight,
-              transition: 'font-size 0.1s ease, background-color 0.2s ease'
-            }}
-          >
-            {inputText ? renderTextWithKerning() : <span className="text-neutral-400 italic">Nhập chữ để kiểm tra hiển thị...</span>}
-          </div>
-        </div>
-
+      {/* Direct Interactive Display Area (Gõ trực tiếp) */}
+      <div className="relative w-full">
+        <textarea
+          id="playground-rendering-box"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          placeholder="Gõ trực tiếp văn bản vào đây để kiểm thử font..."
+          spellCheck={false}
+          className={`w-full ${getHeightStyle()} p-6 border rounded-2xl overflow-y-auto break-words resize-y shadow-inner transition-colors duration-200 outline-none focus:ring-2 focus:ring-amber-400/60 ${getThemeClasses()}`}
+          style={{
+            fontFamily: fontRegistered ? `"${activeFamilyName}", sans-serif` : 'sans-serif',
+            fontSize: `${fontSize}px`,
+            lineHeight: lineHeight,
+            textAlign: textAlign,
+            transition: 'font-size 0.1s ease, background-color 0.2s ease'
+          }}
+        />
       </div>
       
       {!fontRegistered && (
@@ -509,4 +339,5 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
     </div>
   );
 };
+
 
