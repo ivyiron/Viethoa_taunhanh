@@ -941,7 +941,7 @@ export default function App() {
               <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 text-white text-xs font-bold rounded-full mb-3">2</span>
               <h4 className="font-bold text-sm text-neutral-900 mb-1">Căn chỉnh thông minh</h4>
               <p className="text-xs text-neutral-500 leading-normal">
-                Hệ thống tự động căn giữa dấu phụ theo trục X của chữ cái gốc. Trục Y tự động nhảy sát đỉnh hoặc đáy sườn chữ cái. Có thể tinh chỉnh offset riêng biệt nếu muốn.
+                Hệ thống tự động căn chỉnh vị trí, kích thước và cách bỏ dấu cho toàn bộ ký tự. Tất nhiên bạn vẫn có thể tinh chỉnh riêng biệt nếu muốn.
               </p>
             </div>
 
@@ -949,7 +949,7 @@ export default function App() {
               <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 text-white text-xs font-bold rounded-full mb-3">3</span>
               <h4 className="font-bold text-sm text-neutral-900 mb-1">Sao chép Kerning 100%</h4>
               <p className="text-xs text-neutral-500 leading-normal">
-                Tất cả 134 ký tự mới tự động được thừa hưởng (clone) 100% dữ liệu Kerning từ các chữ cái gốc (a, e, o, u, d...). Đảm bảo khoảng cách hiển thị văn bản tự nhiên, tinh tế.
+                Tất cả 134 ký tự mới tự động được thừa hưởng 100% dữ liệu Kerning từ các chữ cái gốc (a, e, o, u, d...). Đảm bảo khoảng cách hiển thị văn bản tự nhiên, tinh tế.
               </p>
             </div>
           </section>
