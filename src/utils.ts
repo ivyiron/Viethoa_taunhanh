@@ -1163,16 +1163,207 @@ export function buildKernTable(font: any): Uint8Array {
 }
 
 /**
+ * Builds a binary OpenType GPOS table (Format 1 Pair Adjustment) from font.kerningPairs.
+ * Modern browsers (Chrome/Blink/HarfBuzz, Firefox, Safari) require a GPOS table with 
+ * 'kern' feature enabled to apply CSS kerning (font-kerning: normal / font-feature-settings: "kern" 1).
+ */
+export function buildGPOSTable(font: any): Uint8Array {
+  if (!font || !font.kerningPairs) {
+    return new Uint8Array(0);
+  }
+
+  const leftToPairs = new Map<number, { right: number; value: number }[]>();
+
+  for (const [key, val] of Object.entries(font.kerningPairs)) {
+    if (typeof val !== 'number' || val === 0) continue;
+    const parts = key.split(',');
+    if (parts.length !== 2) continue;
+    const left = parseInt(parts[0], 10);
+    const right = parseInt(parts[1], 10);
+    if (isNaN(left) || isNaN(right) || left <= 0 || right <= 0) continue;
+
+    if (!leftToPairs.has(left)) {
+      leftToPairs.set(left, []);
+    }
+    leftToPairs.get(left)!.push({ right, value: val });
+  }
+
+  const sortedLeftGlyphs = Array.from(leftToPairs.keys()).sort((a, b) => a - b);
+  if (sortedLeftGlyphs.length === 0) {
+    return new Uint8Array(0);
+  }
+
+  // Sort each left glyph's right pairs by right glyph index ascending
+  for (const leftGlyph of sortedLeftGlyphs) {
+    leftToPairs.get(leftGlyph)!.sort((a, b) => a.right - b.right);
+  }
+
+  const numLeft = sortedLeftGlyphs.length;
+
+  let totalPairSetBytes = 0;
+  for (const leftGlyph of sortedLeftGlyphs) {
+    const pairs = leftToPairs.get(leftGlyph)!;
+    totalPairSetBytes += 2 + 4 * pairs.length;
+  }
+
+  // Exact OpenType GPOS Table Offsets:
+  // GPOS Header: 10 bytes (scriptList=10, featureList=48, lookupList=62)
+  // ScriptList Table: 14 bytes (scriptCount=2, DFLT record, latn record) -> offset 10..23
+  // DFLT Script Table: 4 bytes -> offset 24..27
+  // DFLT LangSys Table: 8 bytes -> offset 28..35
+  // latn Script Table: 4 bytes -> offset 36..39
+  // latn LangSys Table: 8 bytes -> offset 40..47
+  // FeatureList Table: 8 bytes (featureCount=1, FeatureRecord[0] 'kern' offset 8) -> offset 48..55
+  // Feature Table 'kern': 6 bytes -> offset 56..61
+  // LookupList Table: 4 bytes (lookupCount=1, lookupOffsets[0]=4) -> offset 62..65
+  // Lookup Table 0: 8 bytes (lookupType=2, lookupFlag=0, subTableCount=1, subTableOffset[0]=8) -> offset 66..73
+  // Subtable starts at offset 74 (subtableBase = 74):
+  //   Subtable Header: 10 bytes (posFormat=1, coverageOffset, valueFormat1=0x0004, valueFormat2=0, pairSetCount=numLeft) -> 74..83
+  //   pairSetOffsets: 2 * numLeft bytes -> 84 .. (84 + 2 * numLeft - 1)
+  //   Coverage Table: 4 + 2 * numLeft bytes
+  //   PairSet Tables: totalPairSetBytes
+  const headerSize = 74;
+  const pairPosSubtableSize = (10 + 2 * numLeft) + (4 + 2 * numLeft) + totalPairSetBytes;
+  const totalGposSize = headerSize + pairPosSubtableSize;
+
+  const buffer = new ArrayBuffer(totalGposSize);
+  const view = new DataView(buffer);
+
+  // --- 1. GPOS Header (10 bytes) ---
+  const scriptListOffset = 10;
+  const featureListOffset = 48;
+  const lookupListOffset = 62;
+
+  view.setUint16(0, 1); // majorVersion = 1
+  view.setUint16(2, 0); // minorVersion = 0
+  view.setUint16(4, scriptListOffset); // 10
+  view.setUint16(6, featureListOffset); // 48
+  view.setUint16(8, lookupListOffset); // 62
+
+  // --- 2. ScriptList Table (offset 10) ---
+  let o = scriptListOffset;
+  view.setUint16(o, 2); o += 2; // scriptCount = 2 (DFLT, latn)
+
+  // ScriptRecord 0: 'DFLT' -> points to DFLT Script Table at offset 24 (24 - 10 = 14)
+  view.setUint8(o, 'D'.charCodeAt(0));
+  view.setUint8(o + 1, 'F'.charCodeAt(0));
+  view.setUint8(o + 2, 'L'.charCodeAt(0));
+  view.setUint8(o + 3, 'T'.charCodeAt(0));
+  view.setUint16(o + 4, 14);
+  o += 6;
+
+  // ScriptRecord 1: 'latn' -> points to latn Script Table at offset 36 (36 - 10 = 26)
+  view.setUint8(o, 'l'.charCodeAt(0));
+  view.setUint8(o + 1, 'a'.charCodeAt(0));
+  view.setUint8(o + 2, 't'.charCodeAt(0));
+  view.setUint8(o + 3, 'n'.charCodeAt(0));
+  view.setUint16(o + 4, 26);
+  o += 6;
+
+  // DFLT Script Table (offset 24)
+  view.setUint16(o, 4); // defaultLangSysOffset = 4 (24 + 4 = 28)
+  view.setUint16(o + 2, 0); // langSysCount = 0
+  o += 4;
+  // DFLT LangSys Table (offset 28)
+  view.setUint16(o, 0); // lookupOrder = 0
+  view.setUint16(o + 2, 0xFFFF); // reqFeatureIndex = none
+  view.setUint16(o + 4, 1); // featureIndexCount = 1
+  view.setUint16(o + 6, 0); // featureIndices[0] = 0 ('kern')
+  o += 8;
+
+  // latn Script Table (offset 36)
+  view.setUint16(o, 4); // defaultLangSysOffset = 4 (36 + 4 = 40)
+  view.setUint16(o + 2, 0); // langSysCount = 0
+  o += 4;
+  // latn LangSys Table (offset 40)
+  view.setUint16(o, 0); // lookupOrder = 0
+  view.setUint16(o + 2, 0xFFFF); // reqFeatureIndex = none
+  view.setUint16(o + 4, 1); // featureIndexCount = 1
+  view.setUint16(o + 6, 0); // featureIndices[0] = 0 ('kern')
+  o += 8;
+
+  // --- 3. FeatureList Table (offset 48) ---
+  o = featureListOffset;
+  view.setUint16(o, 1); o += 2; // featureCount = 1
+  // FeatureRecord[0]: 'kern' -> points to Feature Table at offset 56 (56 - 48 = 8)
+  view.setUint8(o, 'k'.charCodeAt(0));
+  view.setUint8(o + 1, 'e'.charCodeAt(0));
+  view.setUint8(o + 2, 'r'.charCodeAt(0));
+  view.setUint8(o + 3, 'n'.charCodeAt(0));
+  view.setUint16(o + 4, 8);
+  o += 6;
+  // Feature Table (offset 56)
+  view.setUint16(o, 0); // featureParamsOffset = 0
+  view.setUint16(o + 2, 1); // lookupCount = 1
+  view.setUint16(o + 4, 0); // lookupListIndex[0] = 0
+  o += 6;
+
+  // --- 4. LookupList Table (offset 62) ---
+  o = lookupListOffset;
+  view.setUint16(o, 1); o += 2; // lookupCount = 1
+  view.setUint16(o, 4); o += 2; // lookupOffset[0] = 4 (62 + 4 = 66)
+  // Lookup Table[0] (offset 66)
+  view.setUint16(o, 2); // lookupType = 2 (Pair Adjustment)
+  view.setUint16(o + 2, 0); // lookupFlag = 0
+  view.setUint16(o + 4, 1); // subTableCount = 1
+  view.setUint16(o + 6, 8); // subTableOffset[0] = 8 (66 + 8 = 74)
+  o += 8;
+
+  // --- 5. PairPos Subtable (Format 1) (starts at offset 74) ---
+  const subtableBase = o; // 74
+  view.setUint16(o, 1); // posFormat = 1
+  const coverageRelOffset = 10 + 2 * numLeft;
+  view.setUint16(o + 2, coverageRelOffset); // coverageOffset
+  view.setUint16(o + 4, 0x0004); // valueFormat1 = XAdvance
+  view.setUint16(o + 6, 0x0000); // valueFormat2 = 0
+  view.setUint16(o + 8, numLeft); // pairSetCount
+  o += 10;
+
+  const pairSetOffsetsOffset = o; // 84
+  o += 2 * numLeft;
+
+  // --- 6. Coverage Table (Format 1) ---
+  view.setUint16(o, 1); // coverageFormat = 1
+  view.setUint16(o + 2, numLeft); // glyphCount
+  o += 4;
+
+  for (let i = 0; i < numLeft; i++) {
+    view.setUint16(o, sortedLeftGlyphs[i]);
+    o += 2;
+  }
+
+  // --- 7. PairSet Tables ---
+  for (let i = 0; i < numLeft; i++) {
+    const leftGlyph = sortedLeftGlyphs[i];
+    const pairs = leftToPairs.get(leftGlyph)!;
+    
+    const pairSetRelOffset = o - subtableBase;
+    view.setUint16(pairSetOffsetsOffset + 2 * i, pairSetRelOffset);
+
+    view.setUint16(o, pairs.length); // pairValueCount
+    o += 2;
+
+    for (const pair of pairs) {
+      view.setUint16(o, pair.right); // secondGlyph
+      view.setInt16(o + 2, pair.value); // xAdvance adjustment
+      o += 4;
+    }
+  }
+
+  return new Uint8Array(buffer);
+}
+
+/**
  * Merges advanced OpenType layout tables (GPOS, GSUB, GDEF, BASE) from the original font 
  * into the compiled font buffer to guarantee pristine original kerning and substitution features.
- * When skipGPOS is true, the GPOS table is omitted, allowing browsers to fallback to the legacy 'kern'
- * table which successfully includes all custom Vietnamese character kerning.
+ * Also injects custom GPOS and kern tables for full cross-browser kerning compatibility.
  */
 export function injectAdvancedLayoutTables(
   compiledBuffer: ArrayBuffer, 
   originalBuffer: ArrayBuffer, 
   skipGPOS: boolean = false,
-  kernTableBytes?: Uint8Array
+  kernTableBytes?: Uint8Array,
+  gposTableBytes?: Uint8Array
 ): ArrayBuffer {
   try {
     const parseTables = (buf: ArrayBuffer) => {
@@ -1193,7 +1384,6 @@ export function injectAdvancedLayoutTables(
         const tableOffset = view.getUint32(offset + 8);
         const length = view.getUint32(offset + 12);
         
-        // Use slice to copy safely without detaching backing store
         const data = new Uint8Array(buf.slice(tableOffset, tableOffset + length));
         tables[tag] = data;
         
@@ -1207,19 +1397,25 @@ export function injectAdvancedLayoutTables(
 
     let injectedAny = false;
 
-    // Inject/overwrite the custom legacy kern table if provided
-    if (kernTableBytes) {
-      compiled.tables['kern'] = kernTableBytes;
+    // Inject/overwrite custom GPOS table if provided
+    if (gposTableBytes && gposTableBytes.length > 0) {
+      compiled.tables['GPOS'] = gposTableBytes;
       injectedAny = true;
-    }
-
-    // Ensure we strip GPOS from compiled tables if GPOS is skipped
-    if (skipGPOS && compiled.tables['GPOS']) {
+    } else if (skipGPOS && compiled.tables['GPOS']) {
       delete compiled.tables['GPOS'];
       injectedAny = true;
     }
 
-    const tagsToInject = skipGPOS ? ['GSUB', 'GDEF', 'BASE'] : ['GPOS', 'GSUB', 'GDEF', 'BASE'];
+    // Inject/overwrite the custom legacy kern table if provided
+    if (kernTableBytes && kernTableBytes.length > 0) {
+      compiled.tables['kern'] = kernTableBytes;
+      injectedAny = true;
+    }
+
+    const tagsToInject = ['GSUB', 'GDEF', 'BASE'];
+    if (!gposTableBytes && !skipGPOS) {
+      tagsToInject.push('GPOS');
+    }
 
     tagsToInject.forEach(tag => {
       if (original.tables[tag] && !compiled.tables[tag]) {

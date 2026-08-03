@@ -325,6 +325,9 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
             fontSize: `${fontSize}px`,
             lineHeight: lineHeight,
             textAlign: textAlign,
+            fontKerning: 'normal',
+            fontFeatureSettings: '"kern" 1, "liga" 1',
+            WebkitFontFeatureSettings: '"kern" 1, "liga" 1',
             transition: 'font-size 0.1s ease, background-color 0.2s ease'
           }}
         />

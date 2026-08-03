@@ -4,7 +4,7 @@ import { FontUploader } from './components/FontUploader';
 import { DiacriticStudio } from './components/DiacriticStudio';
 import { AutoCompositeBoard } from './components/AutoCompositeBoard';
 import { FontPlayground } from './components/FontPlayground';
-import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata, VietnameseProjectFile } from './types';
+import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata, VietnameseProjectFile, AutoSpacingRules, AutoKerningSettings } from './types';
 import { 
   DEFAULT_DIACRITICS, 
   DEFAULT_AUTO_RULES, 
@@ -16,12 +16,36 @@ import {
   ensureKerningPairsPopulated, 
   injectAdvancedLayoutTables, 
   buildKernTable,
+  buildGPOSTable,
   findCandidateGlyph,
   extractSvgFromGlyph,
   arrayBufferToBase64,
   base64ToArrayBuffer
 } from './utils';
-import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2, FolderDown, FolderOpen } from 'lucide-react';
+import { AutoKerningStudio } from './components/AutoKerningStudio';
+import { generateFullFontKerningPairs, calculateAutoSpacingAdjustments, findGlyphIndex } from './utils/kerningEngine';
+import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2, FolderDown, FolderOpen, SlidersHorizontal } from 'lucide-react';
+
+const DEFAULT_SPACING_RULES: AutoSpacingRules = {
+  spacingPreset: 'normal',
+  globalTrackingOffset: 0,
+  curveTighteningPercent: 15,
+  applyToLatin: true,
+  applyToVietnamese: true,
+  applyToNumbers: true,
+  applyToPunctuation: true,
+};
+
+const DEFAULT_KERNING_SETTINGS: AutoKerningSettings = {
+  intensityMultiplier: 1.0,
+  minThreshold: 10,
+  applyClassics: true,
+  applyUpperLower: true,
+  applyPunctuation: true,
+  applyNumbers: true,
+  applyVietnameseVariants: true,
+  customPairs: {},
+};
 
 
 export default function App() {
@@ -34,12 +58,14 @@ export default function App() {
   const [templates, setTemplates] = useState<Record<string, DiacriticTemplate>>({});
   const [rules, setRules] = useState<AutoPositionRules>(DEFAULT_AUTO_RULES);
   const [overrides, setOverrides] = useState<Record<string, GlyphOverrideState>>({});
-  
+  const [spacingRules, setSpacingRules] = useState<AutoSpacingRules>(DEFAULT_SPACING_RULES);
+  const [kerningSettings, setKerningSettings] = useState<AutoKerningSettings>(DEFAULT_KERNING_SETTINGS);
+
   // Existing Vietnamese glyph preservation
   const [preserveExistingGlyphs, setPreserveExistingGlyphs] = useState<boolean>(true);
   const [existingGlyphInfo, setExistingGlyphInfo] = useState<{ count: number; total: number; samples: string[] }>({ count: 0, total: 134, samples: [] });
 
-  const [activeTab, setActiveTab] = useState<'components' | 'composite'>('components');
+  const [activeTab, setActiveTab] = useState<'components' | 'composite' | 'spacing'>('components');
   
   const [compiledBuffer, setCompiledBuffer] = useState<ArrayBuffer | null>(null);
   const [compiling, setCompiling] = useState(false);
@@ -301,7 +327,7 @@ export default function App() {
         if (charToGlyphIndexMap[c] !== undefined) {
           return charToGlyphIndexMap[c];
         }
-        return font.charToGlyphIndex(c);
+        return findGlyphIndex(font, c);
       };
 
       const charHornInfo: Record<string, { yMin: number; yMax: number; excessRight: number }> = {};
@@ -434,6 +460,24 @@ export default function App() {
         }
       });
 
+      // Apply Full Font Auto Spacing Adjustments (Sidebearings / Tracking)
+      const autoSpacingMap = calculateAutoSpacingAdjustments(font, spacingRules);
+      for (let i = 0; i < font.glyphs.length; i++) {
+        const g = font.glyphs.get(i);
+        if (g && g.name) {
+          const charStr = g.unicode ? String.fromCharCode(g.unicode) : g.name;
+          if (autoSpacingMap[charStr]) {
+            g.advanceWidth = Math.max(50, (g.advanceWidth || 500) + autoSpacingMap[charStr]);
+          }
+        }
+      }
+
+      // Generate Full-Font Auto Kerning Pairs
+      const autoKerningPairs = generateFullFontKerningPairs(font, kerningSettings);
+      autoKerningPairs.forEach(pair => {
+        pairs[`${pair.indexLeft},${pair.indexRight}`] = pair.value;
+      });
+
       // Loop over every original kerning pair and expand it to all combinations of its base & variant characters
       for (const [key, val] of Object.entries(pairs)) {
         const parts = key.split(',');
@@ -477,6 +521,25 @@ export default function App() {
 
       Object.assign(pairs, newPairs);
 
+      // Ensure user custom kerning pairs take absolute precedence over base character cloned expansion
+      if (kerningSettings.customPairs) {
+        Object.entries(kerningSettings.customPairs).forEach(([pairKey, customVal]) => {
+          const valNum = Number(customVal) || 0;
+          const parts = pairKey.split(',');
+          if (parts.length === 2) {
+            const idxL = findGlyphIndex(font, parts[0]);
+            const idxR = findGlyphIndex(font, parts[1]);
+            if (idxL > 0 && idxR > 0) {
+              if (valNum === 0) {
+                delete pairs[`${idxL},${idxR}`];
+              } else {
+                pairs[`${idxL},${idxR}`] = valNum;
+              }
+            }
+          }
+        });
+      }
+
       // To prevent opentype.js from throwing serialization errors such as "lookupList table too big"
       // or "Table GPOS too big" (due to complex features/lookups in the original font that opentype.js
       // struggles to serialize from scratch), we delete GPOS, GSUB, and GDEF tables from the font's 
@@ -496,11 +559,12 @@ export default function App() {
       // Write font tables to binary OpenType ArrayBuffer
       let buffer = font.toArrayBuffer();
       
-      // Build standard 'kern' table
+      // Build standard 'kern' table and OpenType GPOS table for full cross-browser kerning support
       const kernTableBytes = buildKernTable(font);
+      const gposTableBytes = buildGPOSTable(font);
       
-      // Inject advanced layouts & preserve pristine tables
-      buffer = injectAdvancedLayoutTables(buffer, rawFontBuffer, optimizeWebKerning, kernTableBytes);
+      // Inject custom GPOS and kern tables & preserve pristine original layout tables
+      buffer = injectAdvancedLayoutTables(buffer, rawFontBuffer, false, kernTableBytes, gposTableBytes);
       
       setCompiledBuffer(buffer);
 
@@ -525,7 +589,16 @@ export default function App() {
     } finally {
       setCompiling(false);
     }
-  }, [originalFont, rawFontBuffer, templates, rules, overrides, customFamilyName, customSubfamilyName]);
+  }, [originalFont, rawFontBuffer, templates, rules, overrides, preserveExistingGlyphs, customFamilyName, customSubfamilyName, spacingRules, kerningSettings]);
+
+  // Auto-sync & recompile font preview when kerning settings or spacing rules change
+  useEffect(() => {
+    if (!originalFont || !rawFontBuffer) return;
+    const timer = setTimeout(() => {
+      handleCompileFont(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [spacingRules, kerningSettings, originalFont, rawFontBuffer, handleCompileFont]);
 
   // Project Save Handler (.ftn)
   const handleSaveProject = useCallback(() => {
@@ -549,6 +622,8 @@ export default function App() {
         templates: templates,
         rules: rules,
         overrides: overrides,
+        spacingRules: spacingRules,
+        kerningSettings: kerningSettings,
       };
 
       const jsonString = JSON.stringify(projectData, null, 2);
@@ -611,6 +686,12 @@ export default function App() {
       }
       if (projectData.overrides) {
         setOverrides(projectData.overrides);
+      }
+      if (projectData.spacingRules) {
+        setSpacingRules(projectData.spacingRules);
+      }
+      if (projectData.kerningSettings) {
+        setKerningSettings(projectData.kerningSettings);
       }
 
       // Recalculate existing glyph info
@@ -767,7 +848,23 @@ export default function App() {
                   }`}
                 >
                   <LayoutGrid className="w-4 h-4" />
-                  <span>Bước 2: Căn chỉnh nâng cao (nếu bạn thực sự có tâm)</span>
+                  <span>Bước 2: Căn chỉnh nâng cao</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('spacing');
+                    if ((!compiledBuffer || compiledBuffer === rawFontBuffer) && originalFont) {
+                      handleCompileFont(false);
+                    }
+                  }}
+                  className={`flex items-center gap-2 py-3 px-5 text-sm font-bold border-b-2 transition ${
+                    activeTab === 'spacing'
+                      ? 'border-neutral-900 text-neutral-900'
+                      : 'border-transparent text-neutral-500 hover:text-neutral-950'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-4 h-4 text-indigo-600" />
+                  <span>Bước 3: Auto Spacing & Kerning</span>
                 </button>
               </div>
 
@@ -782,7 +879,7 @@ export default function App() {
                     onUpdateTemplate={handleUpdateTemplate}
                     onUpdateRules={handleUpdateRules}
                   />
-                ) : (
+                ) : activeTab === 'composite' ? (
                   <AutoCompositeBoard
                     font={originalFont}
                     fontMetadata={metadata}
@@ -792,6 +889,19 @@ export default function App() {
                     onUpdateOverride={handleUpdateOverride}
                     onBatchUpdateOverrides={handleBatchUpdateOverrides}
                     preserveExistingGlyphs={preserveExistingGlyphs}
+                  />
+                ) : (
+                  <AutoKerningStudio
+                    font={originalFont}
+                    rawFontBuffer={rawFontBuffer}
+                    compiledBuffer={compiledBuffer}
+                    fontMetadata={metadata}
+                    spacingRules={spacingRules}
+                    kerningSettings={kerningSettings}
+                    onUpdateSpacingRules={(partial) => setSpacingRules(prev => ({ ...prev, ...partial }))}
+                    onUpdateKerningSettings={(partial) => setKerningSettings(prev => ({ ...prev, ...partial }))}
+                    onCompileFont={() => handleCompileFont(false)}
+                    compiling={compiling}
                   />
                 )}
               </div>
@@ -923,35 +1033,6 @@ export default function App() {
 
             </section>
           </>
-        )}
-
-        {/* Informative Step Tutorial (When no font loaded yet) */}
-        {!originalFont && (
-          <section id="instructional-grid" className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
-            <div className="bg-white border border-neutral-100 p-5 rounded-xl shadow-xs">
-              <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 text-white text-xs font-bold rounded-full mb-3">1</span>
-              <h4 className="font-bold text-sm text-neutral-900 mb-1">Cấu hình Dấu phụ mẫu</h4>
-              <p className="text-xs text-neutral-500 leading-normal">
-                Không cần can thiệp tẻ nhạt vào từng ô chữ. Bạn chỉ cần nạp 9 nét dấu mẫu phụ (sắc, huyền, hỏi, ngã, nặng, mũ...) và tinh chỉnh tỷ lệ thu phóng chung một lần duy nhất.
-              </p>
-            </div>
-            
-            <div className="bg-white border border-neutral-100 p-5 rounded-xl shadow-xs">
-              <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 text-white text-xs font-bold rounded-full mb-3">2</span>
-              <h4 className="font-bold text-sm text-neutral-900 mb-1">Căn chỉnh thông minh</h4>
-              <p className="text-xs text-neutral-500 leading-normal">
-                Hệ thống tự động căn chỉnh vị trí, kích thước và cách bỏ dấu cho toàn bộ ký tự. Tất nhiên bạn vẫn có thể tinh chỉnh riêng biệt nếu muốn.
-              </p>
-            </div>
-
-            <div className="bg-white border border-neutral-100 p-5 rounded-xl shadow-xs">
-              <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 text-white text-xs font-bold rounded-full mb-3">3</span>
-              <h4 className="font-bold text-sm text-neutral-900 mb-1">Sao chép Kerning 100%</h4>
-              <p className="text-xs text-neutral-500 leading-normal">
-                Tất cả 134 ký tự mới tự động được thừa hưởng (clone) 100% dữ liệu Kerning từ các chữ cái gốc (a, e, o, u, d...). Đảm bảo khoảng cách hiển thị văn bản tự nhiên, tinh tế.
-              </p>
-            </div>
-          </section>
         )}
 
       </div>

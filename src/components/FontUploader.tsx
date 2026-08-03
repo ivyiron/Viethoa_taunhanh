@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import * as opentype from 'opentype.js';
-import { Upload, FileType, CheckCircle, Info, FolderOpen } from 'lucide-react';
+import { Upload, FileType, CheckCircle, Info, FolderOpen, Sliders, Wand2, CopyCheck } from 'lucide-react';
 import { FontMetadata, VietnameseProjectFile } from '../types';
 
 interface FontUploaderProps {
@@ -205,60 +205,116 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
       />
 
       {!metadata ? (
-        <div
-          id="font-dropzone"
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative group flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-300 ${
-            isDragOver
-              ? 'border-neutral-800 bg-neutral-50 dark:bg-neutral-900/10'
-              : 'border-neutral-200 hover:border-neutral-400 bg-white dark:bg-neutral-950/20'
-          }`}
-        >
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={onFileChange}
-            accept=".otf,.ttf,.ftn"
-            className="hidden"
-          />
-          
-          <div className="p-4 bg-neutral-50 dark:bg-neutral-900 rounded-full mb-4 transition-transform duration-300 group-hover:scale-110">
-            <Upload className="w-8 h-8 text-neutral-500" />
-          </div>
+        <div className="space-y-6">
+          {/* Two-column layout: Dropzone on Left, 3 USP Cards on Right */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Column 1: Dropzone (7 cols) */}
+            <div className="lg:col-span-7 flex flex-col">
+              <div
+                id="font-dropzone"
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative group h-full flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-8 sm:p-10 text-center cursor-pointer transition-all duration-300 ${
+                  isDragOver
+                    ? 'border-neutral-800 bg-neutral-50 dark:bg-neutral-900/10'
+                    : 'border-neutral-200 hover:border-neutral-400 bg-white dark:bg-neutral-950/20 shadow-xs'
+                }`}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={onFileChange}
+                  accept=".otf,.ttf,.ftn"
+                  className="hidden"
+                />
+                
+                <div className="p-4 bg-neutral-50 dark:bg-neutral-900 rounded-full mb-4 transition-transform duration-300 group-hover:scale-110">
+                  <Upload className="w-8 h-8 text-neutral-600 dark:text-neutral-300" />
+                </div>
 
-          <h3 className="text-lg font-medium text-neutral-800 dark:text-neutral-200 mb-1">
-            {loading ? 'Đang phân tích...' : 'Tải lên font hoặc mở file dự án'}
-          </h3>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 max-w-md mb-4">
-            Kéo & thả file font <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">.OTF</span>, <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">.TTF</span> hoặc tệp dự án <span className="font-mono font-bold text-amber-600 dark:text-amber-400">.FTN</span> vào đây, hoặc click để chọn file.
-          </p>
+                <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100 mb-1">
+                  {loading ? 'Đang phân tích...' : 'Tải lên font hoặc mở file dự án'}
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 max-w-md mb-5 leading-relaxed">
+                  Kéo & thả file font <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200">.OTF</span>, <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200">.TTF</span> hoặc tệp dự án <span className="font-mono font-bold text-amber-600 dark:text-amber-400">.FTN</span> vào đây, hoặc click để chọn file.
+                </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-50 dark:bg-neutral-900 rounded-full border border-neutral-100 text-xs text-neutral-500">
-              <FileType className="w-3.5 h-3.5" />
-              <span>Font OpenType & TrueType (.otf, .ttf)</span>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 rounded-full border border-neutral-200/80 text-xs text-neutral-600 dark:text-neutral-400 font-medium">
+                    <FileType className="w-3.5 h-3.5" />
+                    <span>Font OpenType & TrueType (.otf, .ttf)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      projectInputRef.current?.click();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold rounded-full border border-amber-300/70 text-xs transition cursor-pointer shadow-2xs"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Nạp file dự án (.ftn)</span>
+                  </button>
+                </div>
+
+                {error && (
+                  <div className="mt-4 p-3 bg-red-50 dark:bg-red-950/25 border border-red-200 text-red-600 dark:text-red-400 text-xs rounded-lg max-w-md">
+                    {error}
+                  </div>
+                )}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                projectInputRef.current?.click();
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-full border border-amber-200/80 text-xs transition cursor-pointer"
-            >
-              <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
-              <span>Nạp file dự án (.ftn)</span>
-            </button>
-          </div>
 
-          {error && (
-            <div className="mt-4 p-3 bg-red-50 dark:bg-red-950/25 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 text-sm rounded-lg max-w-md">
-              {error}
+            {/* Column 2: 3 USP Cards (5 cols) */}
+            <div className="lg:col-span-5 flex flex-col justify-between gap-3.5">
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 p-4.5 rounded-2xl shadow-2xs flex items-start gap-3.5 transition">
+                <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 text-xs font-bold rounded-xl shrink-0 mt-0.5 shadow-2xs">
+                  1
+                </span>
+                <div>
+                  <h4 className="font-bold text-sm text-neutral-900 dark:text-neutral-100 mb-1 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-amber-500" />
+                    Cấu hình Dấu phụ mẫu
+                  </h4>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                    Không cần can thiệp tẻ nhạt vào từng ô chữ. Bạn chỉ cần nạp 9 nét dấu mẫu phụ (sắc, huyền, hỏi, ngã, nặng, mũ...) và tinh chỉnh tỷ lệ thu phóng chung một lần duy nhất.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 p-4.5 rounded-2xl shadow-2xs flex items-start gap-3.5 transition">
+                <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 text-xs font-bold rounded-xl shrink-0 mt-0.5 shadow-2xs">
+                  2
+                </span>
+                <div>
+                  <h4 className="font-bold text-sm text-neutral-900 dark:text-neutral-100 mb-1 flex items-center gap-1.5">
+                    <Wand2 className="w-3.5 h-3.5 text-blue-500" />
+                    Căn chỉnh thông minh
+                  </h4>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                    Hệ thống tự động căn chỉnh vị trí, kích thước và cách bỏ dấu cho toàn bộ ký tự. Tất nhiên bạn vẫn có thể tinh chỉnh riêng biệt nếu muốn.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 p-4.5 rounded-2xl shadow-2xs flex items-start gap-3.5 transition">
+                <span className="inline-flex items-center justify-center w-7 h-7 bg-neutral-950 dark:bg-neutral-100 text-white dark:text-neutral-950 text-xs font-bold rounded-xl shrink-0 mt-0.5 shadow-2xs">
+                  3
+                </span>
+                <div>
+                  <h4 className="font-bold text-sm text-neutral-900 dark:text-neutral-100 mb-1 flex items-center gap-1.5">
+                    <CopyCheck className="w-3.5 h-3.5 text-emerald-500" />
+                    Sao chép Kerning 100%
+                  </h4>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                    Tất cả 134 ký tự mới tự động được thừa hưởng (clone) 100% dữ liệu Kerning từ các chữ cái gốc (a, e, o, u, d...). Đảm bảo khoảng cách hiển thị văn bản tự nhiên, tinh tế.
+                  </p>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
         </div>
       ) : (
         <div id="font-metadata-panel" className="bg-white border border-neutral-100 rounded-xl p-6 shadow-xs">

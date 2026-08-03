@@ -70,6 +70,27 @@ export interface FontMetadata {
   totalGlyphs: number;
 }
 
+export interface AutoSpacingRules {
+  spacingPreset: 'compact' | 'normal' | 'spacious' | 'custom';
+  globalTrackingOffset: number; // e.g., 0
+  curveTighteningPercent: number; // e.g., 15 (%)
+  applyToLatin: boolean;
+  applyToVietnamese: boolean;
+  applyToNumbers: boolean;
+  applyToPunctuation: boolean;
+}
+
+export interface AutoKerningSettings {
+  intensityMultiplier: number; // e.g. 1.0 (100%)
+  minThreshold: number; // e.g. 10 font units
+  applyClassics: boolean;
+  applyUpperLower: boolean;
+  applyPunctuation: boolean;
+  applyNumbers: boolean;
+  applyVietnameseVariants: boolean;
+  customPairs: Record<string, number>; // "char1,char2": val
+}
+
 export interface VietnameseProjectFile {
   ftnVersion: string;
   appName: string;
@@ -83,4 +104,6 @@ export interface VietnameseProjectFile {
   templates: Record<string, DiacriticTemplate>;
   rules: AutoPositionRules;
   overrides: Record<string, GlyphOverrideState>;
+  spacingRules?: AutoSpacingRules;
+  kerningSettings?: AutoKerningSettings;
 }

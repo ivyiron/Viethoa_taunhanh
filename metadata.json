@@ -1,6 +1,8 @@
 {
   "name": "Việt Hóa Font Tự động",
   "description": "Phiên bản 2.0 Việt hóa font tự động hóa cao cấp: thiết kế 9 dấu mẫu phụ, tự động ghép bám tâm ngang và đồng bộ Kerning cho 134 ký tự.",
+  "name": "Việt Hóa Font - Kerning",
+  "description": "Ứng dụng hỗ trợ Việt hóa font chữ chuyên nghiệp, phát hiện ký tự thiếu, tự động tạo kỹ tự mới",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
