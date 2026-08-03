@@ -104,7 +104,7 @@ export const FontPlayground: React.FC<FontPlaygroundProps> = ({
           </span>
           <div>
             <h3 className="text-base font-extrabold text-neutral-950 tracking-tight flex items-center gap-2">
-              Trình Gõ Thử Font (Test Font)
+              Trình Gõ Thử Font
               <span className="text-[11px] font-normal text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-md font-mono">
                 {inputText.length} ký tự
               </span>

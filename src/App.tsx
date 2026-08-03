@@ -23,6 +23,7 @@ import {
   base64ToArrayBuffer
 } from './utils';
 import { AutoKerningStudio } from './components/AutoKerningStudio';
+import { HelpGuideModal } from './components/HelpGuideModal';
 import { generateFullFontKerningPairs, calculateAutoSpacingAdjustments, findGlyphIndex } from './utils/kerningEngine';
 import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2, FolderDown, FolderOpen, SlidersHorizontal } from 'lucide-react';
 
@@ -66,6 +67,9 @@ export default function App() {
   const [existingGlyphInfo, setExistingGlyphInfo] = useState<{ count: number; total: number; samples: string[] }>({ count: 0, total: 134, samples: [] });
 
   const [activeTab, setActiveTab] = useState<'components' | 'composite' | 'spacing'>('components');
+  const [showSpacingWarningModal, setShowSpacingWarningModal] = useState<boolean>(false);
+  const [hasConfirmedSpacingWarning, setHasConfirmedSpacingWarning] = useState<boolean>(false);
+  const [showHelpGuideModal, setShowHelpGuideModal] = useState<boolean>(false);
   
   const [compiledBuffer, setCompiledBuffer] = useState<ArrayBuffer | null>(null);
   const [compiling, setCompiling] = useState(false);
@@ -186,6 +190,7 @@ export default function App() {
     setOverrides(initialOverrides);
     setRules(DEFAULT_AUTO_RULES);
     setActiveTab('components');
+    setHasConfirmedSpacingWarning(false);
   }, []);
 
   const handleReset = useCallback(() => {
@@ -200,6 +205,7 @@ export default function App() {
     setAppSuccess(null);
     setCustomFamilyName('');
     setCustomSubfamilyName('');
+    setHasConfirmedSpacingWarning(false);
   }, []);
 
   const handleUpdateTemplate = useCallback((id: string, updated: Partial<DiacriticTemplate>) => {
@@ -769,11 +775,25 @@ export default function App() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-neutral-100 rounded-lg border border-neutral-200/50 text-xs text-neutral-600">
-            <HelpCircle className="w-4 h-4 text-neutral-500 shrink-0" />
-            <span>Bản quyền ư? Bạn không có quyền Việt hóa font của người khác đâu nhưng mà quan tâm làm gì cơ chứ.</span>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setShowHelpGuideModal(true)}
+              className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
+              title="Hướng dẫn sử dụng Việt Hóa Font"
+            >
+              <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Hướng dẫn sử dụng</span>
+            </button>
+
+            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-neutral-100 rounded-lg border border-neutral-200/50 text-xs text-neutral-600">
+              <HelpCircle className="w-4 h-4 text-neutral-500 shrink-0" />
+              <span>Bản quyền ư? Bạn không có quyền Việt hóa font của người khác đâu nhưng mà quan tâm làm gì cơ chứ.</span>
+            </div>
           </div>
         </header>
+
+        <HelpGuideModal isOpen={showHelpGuideModal} onClose={() => setShowHelpGuideModal(false)} />
 
         {/* Step 1: Upload Font */}
         <section id="upload-step-section">
@@ -852,9 +872,13 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    setActiveTab('spacing');
-                    if ((!compiledBuffer || compiledBuffer === rawFontBuffer) && originalFont) {
-                      handleCompileFont(false);
+                    if (hasConfirmedSpacingWarning || activeTab === 'spacing') {
+                      setActiveTab('spacing');
+                      if ((!compiledBuffer || compiledBuffer === rawFontBuffer) && originalFont) {
+                        handleCompileFont(false);
+                      }
+                    } else {
+                      setShowSpacingWarningModal(true);
                     }
                   }}
                   className={`flex items-center gap-2 py-3 px-5 text-sm font-bold border-b-2 transition ${
@@ -867,6 +891,51 @@ export default function App() {
                   <span>Bước 3: Auto Spacing & Kerning</span>
                 </button>
               </div>
+
+              {/* Warning Modal before Auto Spacing & Kerning */}
+              {showSpacingWarningModal && (
+                <div className="fixed inset-0 bg-neutral-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
+                  <div className="bg-white border border-neutral-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-scale-in">
+                    <div className="flex items-start gap-3.5">
+                      <div className="p-3 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+                        <AlertTriangle className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <h3 className="text-base font-extrabold text-neutral-900">
+                          Xác Nhận Auto Spacing & Kerning
+                        </h3>
+                        <p className="text-xs text-neutral-600 leading-relaxed font-medium">
+                          Ứng dụng sẽ thay đổi spacing và kerning của hầu hết các ký tự trong font gốc. Để đạt kết quả tối ưu, chỉ nên thực hiện bước này khi thực sự cần thiết và trên phiên bản font đã được Việt hóa, căn chỉnh hoàn chỉnh.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-neutral-100">
+                      <button
+                        type="button"
+                        onClick={() => setShowSpacingWarningModal(false)}
+                        className="px-4 py-2 text-xs font-bold text-neutral-600 hover:text-neutral-900 bg-neutral-100 hover:bg-neutral-200 rounded-xl transition cursor-pointer"
+                      >
+                        Bỏ qua
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSpacingWarningModal(false);
+                          setHasConfirmedSpacingWarning(true);
+                          setActiveTab('spacing');
+                          if ((!compiledBuffer || compiledBuffer === rawFontBuffer) && originalFont) {
+                            handleCompileFont(false);
+                          }
+                        }}
+                        className="px-5 py-2 text-xs font-bold text-white bg-neutral-900 hover:bg-neutral-800 rounded-xl shadow-xs transition cursor-pointer"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Tab Content Display */}
               <div className="animate-fade-in scroll-mt-6">
@@ -986,7 +1055,7 @@ export default function App() {
                       Đóng Gói Bộ Font Việt Hóa 2.0
                     </h3>
                     <p className="text-xs text-neutral-400 mt-0.5 max-w-md">
-                      Biên dịch toàn bộ 134 ký tự đã được thiết lập tự động bên trên thành một tệp font thống nhất, bảo toàn nguyên vẹn tính năng OpenType và Kerning gốc.
+                      Lưu font hoặc lưu file dự án.
                     </p>
                   </div>
                 </div>
@@ -1034,6 +1103,18 @@ export default function App() {
             </section>
           </>
         )}
+
+        {/* Footer Credit */}
+        <footer className="pt-6 pb-4 border-t border-neutral-200/80 text-center text-xs text-neutral-400 font-medium">
+          <a
+            href="https://www.instagram.com/tuannlla/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-neutral-800 transition-colors font-semibold underline decoration-neutral-300 underline-offset-2"
+          >
+            © LaTuan Vibecode
+          </a>
+        </footer>
 
       </div>
     </div>

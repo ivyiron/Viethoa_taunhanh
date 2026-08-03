@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as opentype from 'opentype.js';
 import { Sliders, Sparkles, Copy, Trash2, ArrowLeftRight, Link, Link2Off, ZoomIn, ZoomOut, RotateCcw, AlertCircle, HelpCircle, Check, Layers, Code, FileCode, Search, X } from 'lucide-react';
 import { DiacriticTemplate, AutoPositionRules, FontMetadata } from '../types';
+import { NumericInput } from './NumericInput';
 import { getExactBoundingBox, removeDotFromICommands, parseSvgPath, extractPathDataFromSvg, transformCommands, calculateAutoPosition, getGroupReferenceHeights, DEFAULT_DIACRITICS, findCandidateGlyph, extractSvgFromGlyph, VIETNAMESE_RECIPES, composeGlyphPath, getNativeCharSvgPath, getNativeCharFullSvg, extractDiacriticFromSpecificChar, getExtractedDiacriticSvgPathFromChar, formatSvgPathToFullSvg } from '../utils';
 
 // Double Accent Vowel Groups configuration
@@ -375,7 +376,7 @@ const DoubleAccentLiveviewInspector: React.FC<{
       <div className="flex flex-wrap justify-between items-center gap-2">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-extrabold text-neutral-900">
-            Xem trước dấu kép trực tiếp:
+            Dấu kép:
           </span>
           <span className="text-[10px] bg-neutral-200/80 text-neutral-900 font-mono font-black px-2 py-0.5 rounded-md">
             Mẫu: {selectedChar}
@@ -1909,24 +1910,20 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
             </div>
             
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-100/50 space-y-1">
+              <div className="bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/70 space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-[9px] text-neutral-400 font-mono block">Scale X</span>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min="0.1"
-                    max="10.0"
+                  <span className="text-[10px] text-neutral-600 font-bold">Scale X</span>
+                  <NumericInput
                     value={activeScaleX}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      if (isNaN(val)) return;
+                    onChange={(val) => {
                       updateActiveValue({
                         scaleX: val,
                         ...(scaleLinked ? { scaleY: val } : {})
                       });
                     }}
-                    className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
+                    step={0.05}
+                    min={0.01}
+                    max={10.0}
                   />
                 </div>
                 <input
@@ -1942,26 +1939,20 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
                       ...(scaleLinked ? { scaleY: val } : {})
                     });
                   }}
-                  className="w-full accent-neutral-800 cursor-pointer"
+                  className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                 />
               </div>
 
-              <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-100/50 space-y-1">
+              <div className="bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/70 space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-[9px] text-neutral-400 font-mono block">Scale Y</span>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min="0.1"
-                    max="10.0"
+                  <span className="text-[10px] text-neutral-600 font-bold">Scale Y</span>
+                  <NumericInput
                     value={activeScaleY}
                     disabled={scaleLinked}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      if (isNaN(val)) return;
-                      updateActiveValue({ scaleY: val });
-                    }}
-                    className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white disabled:opacity-40"
+                    onChange={(val) => updateActiveValue({ scaleY: val })}
+                    step={0.05}
+                    min={0.01}
+                    max={10.0}
                   />
                 </div>
                 <input
@@ -1975,14 +1966,14 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
                     const val = parseFloat(e.target.value);
                     updateActiveValue({ scaleY: val });
                   }}
-                  className="w-full accent-neutral-800 disabled:opacity-40 cursor-pointer"
+                  className="w-full h-1.5 accent-neutral-800 disabled:opacity-40 cursor-pointer rounded-lg bg-neutral-200"
                 />
               </div>
             </div>
 
             {/* Shift Tweaks */}
             <div className="space-y-3">
-              <label className="flex items-start gap-2 bg-neutral-50 p-2.5 rounded-lg border border-neutral-150 cursor-pointer select-none">
+              <label className="flex items-start gap-2 bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/70 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={activeAutoCenterX}
@@ -1993,7 +1984,7 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
                       ...(isChecked ? { offsetX: 0 } : {})
                     });
                   }}
-                  className="rounded-sm border-neutral-300 text-neutral-800 mt-0.5"
+                  className="rounded-sm border-neutral-300 text-neutral-800 mt-0.5 cursor-pointer accent-neutral-800"
                 />
                 <div className="flex flex-col">
                   <span className="text-[10px] font-bold text-neutral-900">Tự động căn giữa ngang (Auto-center X)</span>
@@ -2002,24 +1993,20 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
               </label>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className={`p-2 rounded-lg border transition space-y-1 ${
+                <div className={`p-2.5 rounded-xl border transition space-y-2 ${
                   activeAutoCenterX 
-                    ? 'bg-neutral-50/50 border-neutral-150/40 opacity-55 select-none' 
-                    : 'bg-neutral-50 border-neutral-100/50'
+                    ? 'bg-neutral-50/50 border-neutral-200/40 opacity-55 select-none' 
+                    : 'bg-neutral-50 border-neutral-200/70'
                 }`}>
-                  <div className="flex justify-between items-center text-[9px]">
-                    <span className="text-neutral-500 font-medium">Lệch X (Dịch ngang)</span>
-                    <input
-                      type="number"
-                      step="5"
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="text-neutral-600 font-bold">Lệch X (Dịch ngang)</span>
+                    <NumericInput
                       value={activeOffsetX}
                       disabled={activeAutoCenterX}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        updateActiveValue({ offsetX: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white disabled:bg-neutral-100 disabled:opacity-50"
+                      onChange={(val) => updateActiveValue({ offsetX: val })}
+                      step={5}
+                      min={-2000}
+                      max={2000}
                     />
                   </div>
                   <input
@@ -2030,23 +2017,19 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
                     value={activeOffsetX}
                     disabled={activeAutoCenterX}
                     onChange={(e) => updateActiveValue({ offsetX: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed rounded-lg bg-neutral-200"
                   />
                 </div>
 
-                <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-100/50 space-y-1">
-                  <div className="flex justify-between items-center text-[9px]">
-                    <span className="text-neutral-500 font-medium">Lệch Y (Dịch dọc)</span>
-                    <input
-                      type="number"
-                      step="5"
+                <div className="bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/70 space-y-2">
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="text-neutral-600 font-bold">Lệch Y (Dịch dọc)</span>
+                    <NumericInput
                       value={activeOffsetY}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        updateActiveValue({ offsetY: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
+                      onChange={(val) => updateActiveValue({ offsetY: val })}
+                      step={5}
+                      min={-2000}
+                      max={2000}
                     />
                   </div>
                   <input
@@ -2056,7 +2039,7 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
                     step="5"
                     value={activeOffsetY}
                     onChange={(e) => updateActiveValue({ offsetY: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                   />
                 </div>
               </div>
@@ -2089,97 +2072,73 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
             </div>
 
             {/* Gap settings */}
-            <div className="space-y-2.5">
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-[10px] text-neutral-600">
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs text-neutral-700 font-semibold">
                   <span>Khoảng cách dấu trên Chữ thường:</span>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="5"
-                      min="0"
-                      max="1000"
-                      value={rules.lowercaseAccentGap}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        onUpdateRules({ lowercaseAccentGap: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
-                    />
-                    <span className="font-bold text-neutral-800 font-mono">UPM</span>
-                  </div>
+                  <NumericInput
+                    value={rules.lowercaseAccentGap}
+                    onChange={(val) => onUpdateRules({ lowercaseAccentGap: val })}
+                    step={5}
+                    min={-1000}
+                    max={1000}
+                    unit="UPM"
+                  />
                 </div>
                 <input
                   type="range"
-                  min="0"
+                  min="-500"
                   max="1000"
                   step="5"
                   value={rules.lowercaseAccentGap}
                   onChange={(e) => onUpdateRules({ lowercaseAccentGap: parseInt(e.target.value) })}
-                  className="w-full accent-neutral-800 cursor-pointer"
+                  className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                 />
               </div>
 
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-[10px] text-neutral-600">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs text-neutral-700 font-semibold">
                   <span>Khoảng cách dấu trên Chữ hoa:</span>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="5"
-                      min="0"
-                      max="1000"
-                      value={rules.uppercaseAccentGap}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        onUpdateRules({ uppercaseAccentGap: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
-                    />
-                    <span className="font-bold text-neutral-800 font-mono">UPM</span>
-                  </div>
+                  <NumericInput
+                    value={rules.uppercaseAccentGap}
+                    onChange={(val) => onUpdateRules({ uppercaseAccentGap: val })}
+                    step={5}
+                    min={-1000}
+                    max={1000}
+                    unit="UPM"
+                  />
                 </div>
                 <input
                   type="range"
-                  min="0"
+                  min="-500"
                   max="1000"
                   step="5"
                   value={rules.uppercaseAccentGap}
                   onChange={(e) => onUpdateRules({ uppercaseAccentGap: parseInt(e.target.value) })}
-                  className="w-full accent-neutral-800 cursor-pointer"
+                  className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                 />
               </div>
 
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-[10px] text-neutral-600">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs text-neutral-700 font-semibold">
                   <span>Khoảng cách Dấu nặng (Dưới):</span>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="5"
-                      min="0"
-                      max="1000"
-                      value={rules.dotBelowGap}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        onUpdateRules({ dotBelowGap: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
-                    />
-                    <span className="font-bold text-neutral-800 font-mono">UPM</span>
-                  </div>
+                  <NumericInput
+                    value={rules.dotBelowGap}
+                    onChange={(val) => onUpdateRules({ dotBelowGap: val })}
+                    step={5}
+                    min={-1000}
+                    max={1000}
+                    unit="UPM"
+                  />
                 </div>
                 <input
                   type="range"
-                  min="0"
+                  min="-500"
                   max="1000"
                   step="5"
                   value={rules.dotBelowGap}
                   onChange={(e) => onUpdateRules({ dotBelowGap: parseInt(e.target.value) })}
-                  className="w-full accent-neutral-800 cursor-pointer"
+                  className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                 />
               </div>
             </div>
@@ -2201,7 +2160,7 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
                 </span>
                 <div>
                   <h3 className="text-base font-extrabold text-neutral-950 tracking-tight">
-                    Cấu Hình Kiểu Ghép Dấu Kép
+                    Kiểu Ghép Dấu Kép
                   </h3>
                   <p className="text-xs text-neutral-500 mt-0.5 leading-relaxed">
                     Tùy chỉnh quy tắc vị trí ghép 2 dấu đối với các nguyên âm có dấu mũ hoặc dấu trăng (ấ, ế, ố, ắ, ẩ...).
@@ -2266,97 +2225,73 @@ export const DiacriticStudio: React.FC<DiacriticStudioProps> = ({
 
                 {/* Gap Y */}
                 <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-neutral-700">
-                    <span className="font-semibold">Khoảng cách (Gap):</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        step="5"
-                        min="-100"
-                        max="300"
-                        value={rules.doubleAccentGap}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          if (isNaN(val)) return;
-                          onUpdateRules({ doubleAccentGap: val });
-                        }}
-                        className="w-16 text-right text-xs font-mono px-1.5 py-0.5 border border-neutral-200 rounded-md bg-white font-bold"
-                      />
-                      <span className="font-bold text-neutral-800 font-mono text-[10px]">UPM</span>
-                    </div>
+                  <div className="flex justify-between items-center text-neutral-700 font-semibold">
+                    <span>Khoảng cách (Gap):</span>
+                    <NumericInput
+                      value={rules.doubleAccentGap}
+                      onChange={(val) => onUpdateRules({ doubleAccentGap: val })}
+                      step={5}
+                      min={-500}
+                      max={500}
+                      unit="UPM"
+                    />
                   </div>
                   <input
                     type="range"
-                    min="-100"
-                    max="300"
+                    min="-200"
+                    max="500"
                     step="5"
                     value={rules.doubleAccentGap}
                     onChange={(e) => onUpdateRules({ doubleAccentGap: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                   />
                 </div>
 
                 {/* Custom Offset X */}
                 <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-neutral-700">
-                    <span className="font-semibold">Dịch ngang X (Dấu trên):</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        step="5"
-                        min="-250"
-                        max="250"
-                        value={rules.doubleAccentCustomX ?? 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          if (isNaN(val)) return;
-                          onUpdateRules({ doubleAccentCustomX: val });
-                        }}
-                        className="w-16 text-right text-xs font-mono px-1.5 py-0.5 border border-neutral-200 rounded-md bg-white font-bold"
-                      />
-                      <span className="font-bold text-neutral-800 font-mono text-[10px]">UPM</span>
-                    </div>
+                  <div className="flex justify-between items-center text-neutral-700 font-semibold">
+                    <span>Dịch ngang X (Dấu trên):</span>
+                    <NumericInput
+                      value={rules.doubleAccentCustomX ?? 0}
+                      onChange={(val) => onUpdateRules({ doubleAccentCustomX: val })}
+                      step={5}
+                      min={-500}
+                      max={500}
+                      unit="UPM"
+                    />
                   </div>
                   <input
                     type="range"
-                    min="-250"
-                    max="250"
+                    min="-500"
+                    max="500"
                     step="5"
                     value={rules.doubleAccentCustomX ?? 0}
                     onChange={(e) => onUpdateRules({ doubleAccentCustomX: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                   />
                 </div>
 
                 {/* Custom Offset Y */}
                 <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-neutral-700">
-                    <span className="font-semibold">Dịch dọc Y (Bổ sung):</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        step="5"
-                        min="-200"
-                        max="200"
-                        value={rules.doubleAccentCustomY ?? 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          if (isNaN(val)) return;
-                          onUpdateRules({ doubleAccentCustomY: val });
-                        }}
-                        className="w-16 text-right text-xs font-mono px-1.5 py-0.5 border border-neutral-200 rounded-md bg-white font-bold"
-                      />
-                      <span className="font-bold text-neutral-800 font-mono text-[10px]">UPM</span>
-                    </div>
+                  <div className="flex justify-between items-center text-neutral-700 font-semibold">
+                    <span>Dịch dọc Y (Bổ sung):</span>
+                    <NumericInput
+                      value={rules.doubleAccentCustomY ?? 0}
+                      onChange={(val) => onUpdateRules({ doubleAccentCustomY: val })}
+                      step={5}
+                      min={-500}
+                      max={500}
+                      unit="UPM"
+                    />
                   </div>
                   <input
                     type="range"
-                    min="-200"
-                    max="200"
+                    min="-500"
+                    max="500"
                     step="5"
                     value={rules.doubleAccentCustomY ?? 0}
                     onChange={(e) => onUpdateRules({ doubleAccentCustomY: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                   />
                 </div>
               </div>

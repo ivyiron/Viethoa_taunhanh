@@ -3,6 +3,7 @@ import * as opentype from 'opentype.js';
 import { Sliders, Sparkles, Filter, CheckCircle, ChevronRight, HelpCircle, Info, Move, Settings, Check } from 'lucide-react';
 import { DiacriticTemplate, AutoPositionRules, GlyphOverrideState, FontMetadata } from '../types';
 import { STEP2_RECIPES, isUnaccentedBaseChar, composeGlyphPath, ComponentRecipe, getTrackingFamilyMembers } from '../utils';
+import { NumericInput } from './NumericInput';
 
 const getDiaName = (id: string): string => {
   const names: Record<string, string> = {
@@ -655,27 +656,19 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
           <div className="space-y-4">
             
             {/* Tracking (advance width tweak) */}
-            <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/40 space-y-1">
+            <div className="bg-indigo-50/50 p-3.5 rounded-xl border border-indigo-100/60 space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-indigo-950 flex items-center gap-1">
                   Độ rộng chữ (Tracking / LSB)
                 </span>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="5"
-                    min="-1000"
-                    max="1000"
-                    value={activeOverride.advanceWidthTweak}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      if (isNaN(val)) return;
-                      onUpdateOverride(selectedChar, { advanceWidthTweak: val });
-                    }}
-                    className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-indigo-200 rounded-sm bg-white text-indigo-950"
-                  />
-                  <span className="text-[9px] font-mono text-indigo-500 font-bold">UPM</span>
-                </div>
+                <NumericInput
+                  value={activeOverride.advanceWidthTweak}
+                  onChange={(val) => onUpdateOverride(selectedChar, { advanceWidthTweak: val })}
+                  step={5}
+                  min={-1000}
+                  max={1000}
+                  unit="UPM"
+                />
               </div>
               <input
                 id="slider-advance-width-tweak"
@@ -685,7 +678,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                 step="5"
                 value={activeOverride.advanceWidthTweak}
                 onChange={(e) => onUpdateOverride(selectedChar, { advanceWidthTweak: parseInt(e.target.value) })}
-                className="w-full accent-indigo-600 cursor-pointer"
+                className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-indigo-200/60"
               />
               <p className="text-[9px] text-indigo-600/90 leading-snug">
                 * Thay đổi tracking sẽ <strong>tự động đồng bộ</strong> cho cả bộ chữ liên quan:{' '}
@@ -700,21 +693,15 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
               </span>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-neutral-50 p-2.5 rounded-lg border border-neutral-100 space-y-1">
+                <div className="bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/70 space-y-2">
                   <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-neutral-500">Lệch X</span>
-                    <input
-                      type="number"
-                      step="5"
-                      min="-2000"
-                      max="2000"
+                    <span className="text-neutral-600 font-bold">Lệch X</span>
+                    <NumericInput
                       value={activeOverride.offsetX}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        onUpdateOverride(selectedChar, { offsetX: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
+                      onChange={(val) => onUpdateOverride(selectedChar, { offsetX: val })}
+                      step={5}
+                      min={-2000}
+                      max={2000}
                     />
                   </div>
                   <input
@@ -724,25 +711,19 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                     step="5"
                     value={activeOverride.offsetX}
                     onChange={(e) => onUpdateOverride(selectedChar, { offsetX: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                   />
                 </div>
 
-                <div className="bg-neutral-50 p-2.5 rounded-lg border border-neutral-100 space-y-1">
+                <div className="bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/70 space-y-2">
                   <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-neutral-500">Lệch Y</span>
-                    <input
-                      type="number"
-                      step="5"
-                      min="-2000"
-                      max="2000"
+                    <span className="text-neutral-600 font-bold">Lệch Y</span>
+                    <NumericInput
                       value={activeOverride.offsetY}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) return;
-                        onUpdateOverride(selectedChar, { offsetY: val });
-                      }}
-                      className="w-16 text-right text-[10px] font-mono px-1 py-0.5 border border-neutral-200 rounded-sm bg-white"
+                      onChange={(val) => onUpdateOverride(selectedChar, { offsetY: val })}
+                      step={5}
+                      min={-2000}
+                      max={2000}
                     />
                   </div>
                   <input
@@ -752,7 +733,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                     step="5"
                     value={activeOverride.offsetY}
                     onChange={(e) => onUpdateOverride(selectedChar, { offsetY: parseInt(e.target.value) })}
-                    className="w-full accent-neutral-800 cursor-pointer"
+                    className="w-full h-1.5 accent-neutral-800 cursor-pointer rounded-lg bg-neutral-200"
                   />
                 </div>
               </div>
@@ -766,26 +747,20 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                 </span>
 
                 {/* First Component */}
-                <div className="p-3 bg-indigo-50/25 border border-indigo-100 rounded-xl space-y-3">
+                <div className="p-3 bg-indigo-50/30 border border-indigo-100 rounded-xl space-y-3">
                   <span className="text-[10px] font-bold text-indigo-950 block">
                     1. {getDiaName(activeRecipe.components[0])}
                   </span>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-medium text-neutral-500">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px] font-medium text-neutral-600">
                         <span>Lệch X</span>
-                        <input
-                          type="number"
-                          step="5"
-                          min="-1000"
-                          max="1000"
+                        <NumericInput
                           value={activeOverride.comp1OffsetX ?? 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (isNaN(val)) return;
-                            onUpdateOverride(selectedChar, { comp1OffsetX: val });
-                          }}
-                          className="w-12 text-right text-[9px] font-mono border border-neutral-200 rounded-sm bg-white"
+                          onChange={(val) => onUpdateOverride(selectedChar, { comp1OffsetX: val })}
+                          step={5}
+                          min={-1000}
+                          max={1000}
                         />
                       </div>
                       <input
@@ -795,24 +770,18 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                         step="5"
                         value={activeOverride.comp1OffsetX ?? 0}
                         onChange={(e) => onUpdateOverride(selectedChar, { comp1OffsetX: parseInt(e.target.value) })}
-                        className="w-full accent-indigo-600 cursor-pointer"
+                        className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-indigo-200/60"
                       />
                     </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-medium text-neutral-500">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px] font-medium text-neutral-600">
                         <span>Lệch Y</span>
-                        <input
-                          type="number"
-                          step="5"
-                          min="-1000"
-                          max="1000"
+                        <NumericInput
                           value={activeOverride.comp1OffsetY ?? 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (isNaN(val)) return;
-                            onUpdateOverride(selectedChar, { comp1OffsetY: val });
-                          }}
-                          className="w-12 text-right text-[9px] font-mono border border-neutral-200 rounded-sm bg-white"
+                          onChange={(val) => onUpdateOverride(selectedChar, { comp1OffsetY: val })}
+                          step={5}
+                          min={-1000}
+                          max={1000}
                         />
                       </div>
                       <input
@@ -822,33 +791,27 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                         step="5"
                         value={activeOverride.comp1OffsetY ?? 0}
                         onChange={(e) => onUpdateOverride(selectedChar, { comp1OffsetY: parseInt(e.target.value) })}
-                        className="w-full accent-indigo-600 cursor-pointer"
+                        className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-indigo-200/60"
                       />
                     </div>
                   </div>
                 </div>
 
                 {/* Second Component */}
-                <div className="p-3 bg-indigo-50/25 border border-indigo-100 rounded-xl space-y-3">
+                <div className="p-3 bg-indigo-50/30 border border-indigo-100 rounded-xl space-y-3">
                   <span className="text-[10px] font-bold text-indigo-950 block">
                     2. {getDiaName(activeRecipe.components[1])}
                   </span>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-medium text-neutral-500">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px] font-medium text-neutral-600">
                         <span>Lệch X</span>
-                        <input
-                          type="number"
-                          step="5"
-                          min="-1000"
-                          max="1000"
+                        <NumericInput
                           value={activeOverride.comp2OffsetX ?? 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (isNaN(val)) return;
-                            onUpdateOverride(selectedChar, { comp2OffsetX: val });
-                          }}
-                          className="w-12 text-right text-[9px] font-mono border border-neutral-200 rounded-sm bg-white"
+                          onChange={(val) => onUpdateOverride(selectedChar, { comp2OffsetX: val })}
+                          step={5}
+                          min={-1000}
+                          max={1000}
                         />
                       </div>
                       <input
@@ -858,24 +821,18 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                         step="5"
                         value={activeOverride.comp2OffsetX ?? 0}
                         onChange={(e) => onUpdateOverride(selectedChar, { comp2OffsetX: parseInt(e.target.value) })}
-                        className="w-full accent-indigo-600 cursor-pointer"
+                        className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-indigo-200/60"
                       />
                     </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-medium text-neutral-500">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px] font-medium text-neutral-600">
                         <span>Lệch Y</span>
-                        <input
-                          type="number"
-                          step="5"
-                          min="-1000"
-                          max="1000"
+                        <NumericInput
                           value={activeOverride.comp2OffsetY ?? 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (isNaN(val)) return;
-                            onUpdateOverride(selectedChar, { comp2OffsetY: val });
-                          }}
-                          className="w-12 text-right text-[9px] font-mono border border-neutral-200 rounded-sm bg-white"
+                          onChange={(val) => onUpdateOverride(selectedChar, { comp2OffsetY: val })}
+                          step={5}
+                          min={-1000}
+                          max={1000}
                         />
                       </div>
                       <input
@@ -885,7 +842,7 @@ export const AutoCompositeBoard: React.FC<AutoCompositeBoardProps> = ({
                         step="5"
                         value={activeOverride.comp2OffsetY ?? 0}
                         onChange={(e) => onUpdateOverride(selectedChar, { comp2OffsetY: parseInt(e.target.value) })}
-                        className="w-full accent-indigo-600 cursor-pointer"
+                        className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-indigo-200/60"
                       />
                     </div>
                   </div>

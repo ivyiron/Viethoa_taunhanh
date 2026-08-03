@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import * as opentype from 'opentype.js';
 import { AutoSpacingRules, AutoKerningSettings, FontMetadata } from '../types';
+import { NumericInput } from './NumericInput';
 import {
   generateFullFontKerningPairs,
   calculateAutoSpacingAdjustments,
@@ -389,43 +390,53 @@ export const AutoKerningStudio: React.FC<AutoKerningStudioProps> = ({
             </div>
 
             {/* Global Tracking Offset Slider */}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-neutral-700">Độ giãn Tracking Toàn Bộ (Font Units):</span>
-                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
-                  {spacingRules.globalTrackingOffset > 0 ? `+${spacingRules.globalTrackingOffset}` : spacingRules.globalTrackingOffset} UPM
-                </span>
+                <span className="font-bold text-neutral-700">Độ giãn Tracking Toàn Bộ:</span>
+                <NumericInput
+                  value={spacingRules.globalTrackingOffset}
+                  onChange={(val) => onUpdateSpacingRules({ globalTrackingOffset: val })}
+                  step={2}
+                  min={-200}
+                  max={200}
+                  unit="UPM"
+                />
               </div>
               <input
                 type="range"
-                min="-60"
-                max="60"
+                min="-100"
+                max="100"
                 step="2"
                 value={spacingRules.globalTrackingOffset}
                 onChange={(e) => onUpdateSpacingRules({ globalTrackingOffset: parseInt(e.target.value, 10) })}
-                className="w-full accent-indigo-600 cursor-pointer"
+                className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-neutral-200"
               />
             </div>
 
             {/* Curve Tightening Ratio Slider */}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-neutral-700">Tỷ lệ Tối Ưu Chữ Tròn (O, C, o, e):</span>
-                <span className="font-mono font-bold text-neutral-800">
-                  {spacingRules.curveTighteningPercent}%
-                </span>
+                <NumericInput
+                  value={spacingRules.curveTighteningPercent}
+                  onChange={(val) => onUpdateSpacingRules({ curveTighteningPercent: val })}
+                  step={1}
+                  min={-50}
+                  max={100}
+                  unit="%"
+                />
               </div>
               <input
                 type="range"
-                min="0"
-                max="30"
+                min="-50"
+                max="100"
                 step="5"
                 value={spacingRules.curveTighteningPercent}
                 onChange={(e) => onUpdateSpacingRules({ curveTighteningPercent: parseInt(e.target.value, 10) })}
-                className="w-full accent-indigo-600 cursor-pointer"
+                className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-neutral-200"
               />
               <p className="text-[11px] text-neutral-400">
-                Tự động thu hẹp khoảng bên (sidebearing) của chữ cái cong tròn (O, C, e) giúp chữ không bị cảm giác hở hoác.
+                Tự động thu hẹp/mở rộng khoảng bên (sidebearing) của chữ cái cong tròn (O, C, e) giúp chữ cân bằng hơn.
               </p>
             </div>
           </div>
@@ -442,40 +453,50 @@ export const AutoKerningStudio: React.FC<AutoKerningStudioProps> = ({
             </div>
 
             {/* Kerning Multiplier Slider */}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-neutral-700">Cường Độ Kerning (Multiplier):</span>
-                <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
-                  {Math.round(kerningSettings.intensityMultiplier * 100)}%
-                </span>
+                <NumericInput
+                  value={Math.round(kerningSettings.intensityMultiplier * 100)}
+                  onChange={(val) => onUpdateKerningSettings({ intensityMultiplier: val / 100 })}
+                  step={5}
+                  min={-200}
+                  max={300}
+                  unit="%"
+                />
               </div>
               <input
                 type="range"
-                min="0.4"
-                max="1.6"
+                min="-1"
+                max="3"
                 step="0.05"
                 value={kerningSettings.intensityMultiplier}
                 onChange={(e) => onUpdateKerningSettings({ intensityMultiplier: parseFloat(e.target.value) })}
-                className="w-full accent-indigo-600 cursor-pointer"
+                className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-neutral-200"
               />
             </div>
 
             {/* Minimum Threshold Slider */}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-neutral-700">Ngưỡng Bỏ Qua Nhiễu (Min Threshold):</span>
-                <span className="font-mono font-bold text-neutral-800">
-                  &lt; {kerningSettings.minThreshold} UPM
-                </span>
+                <NumericInput
+                  value={kerningSettings.minThreshold}
+                  onChange={(val) => onUpdateKerningSettings({ minThreshold: val })}
+                  step={1}
+                  min={-100}
+                  max={100}
+                  unit="UPM"
+                />
               </div>
               <input
                 type="range"
-                min="0"
-                max="25"
+                min="-50"
+                max="50"
                 step="1"
                 value={kerningSettings.minThreshold}
                 onChange={(e) => onUpdateKerningSettings({ minThreshold: parseInt(e.target.value, 10) })}
-                className="w-full accent-indigo-600 cursor-pointer"
+                className="w-full h-1.5 accent-indigo-600 cursor-pointer rounded-lg bg-neutral-200"
               />
             </div>
 
@@ -533,17 +554,15 @@ export const AutoKerningStudio: React.FC<AutoKerningStudioProps> = ({
         {/* Header & Main Mode Controls */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-neutral-800 pb-5">
           <div className="flex items-center gap-3">
-            <span className="p-2.5 bg-indigo-500/20 text-indigo-400 rounded-xl inline-flex items-center justify-center border border-indigo-500/30 shadow-xs">
-              <Eye className="w-5 h-5 text-indigo-400" />
-            </span>
-            <div>
+               
+              <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-extrabold text-white tracking-tight">
-                  So Sánh
+                  
                 </h3>
               </div>
               <p className="text-xs text-neutral-400 mt-0.5">
-                Kiểm tra nhịp điệu chữ & khoảng cách quang học.
+                
               </p>
             </div>
           </div>
@@ -576,7 +595,7 @@ export const AutoKerningStudio: React.FC<AutoKerningStudioProps> = ({
                 title="So sánh dịch chuyển ký tự"
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>Shadow Diff</span>
+                <span>Overlay</span>
               </button>
 
               <button
@@ -1011,11 +1030,12 @@ export const AutoKerningStudio: React.FC<AutoKerningStudioProps> = ({
             />
 
             <span className="text-xs text-neutral-400">Giá trị:</span>
-            <input
-              type="number"
+            <NumericInput
               value={newValue}
-              onChange={(e) => setNewValue(parseInt(e.target.value, 10) || 0)}
-              className="w-20 text-xs text-center font-mono font-bold px-2 py-1.5 bg-white border border-neutral-200 rounded-lg outline-hidden"
+              onChange={(val) => setNewValue(val)}
+              step={5}
+              min={-1000}
+              max={1000}
             />
 
             <button
@@ -1079,27 +1099,16 @@ export const AutoKerningStudio: React.FC<AutoKerningStudioProps> = ({
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleEditPairValue(pair.charLeft, pair.charRight, pair.value - 5)}
-                        className="px-1.5 py-0.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 font-bold rounded text-xs cursor-pointer"
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
+                    <div className="flex items-center justify-center pt-0.5">
+                      <NumericInput
                         value={pair.value}
-                        onChange={(e) => handleEditPairValue(pair.charLeft, pair.charRight, parseInt(e.target.value, 10) || 0)}
-                        className="w-full text-center font-mono font-extrabold text-xs py-0.5 bg-white border border-neutral-200 rounded text-indigo-700 outline-hidden"
+                        onChange={(val) => handleEditPairValue(pair.charLeft, pair.charRight, val)}
+                        step={5}
+                        min={-2000}
+                        max={2000}
+                        size="sm"
+                        className="w-full justify-between"
                       />
-                      <button
-                        type="button"
-                        onClick={() => handleEditPairValue(pair.charLeft, pair.charRight, pair.value + 5)}
-                        className="px-1.5 py-0.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 font-bold rounded text-xs cursor-pointer"
-                      >
-                        +
-                      </button>
                     </div>
                   </div>
                 </div>
