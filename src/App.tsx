@@ -554,9 +554,8 @@ export default function App() {
       // byte-for-byte from the original font buffer, this bypasses the buggy serializer while 
       // completely preserving original kerning, ligatures, and features!
       if (font.tables) {
-        if (font.tables.head) {
-          font.tables.head.flags |= 0x0040; // Set TrueType OVERLAP_SIMPLE flag (bit 6) for composite glyph rasterization
-        }
+        // NOTE: bit 6 of head.flags must stay 0 per the OpenType spec. OVERLAP_SIMPLE is a
+        // per-glyph flag inside the 'glyf' table, not a head flag, so it is not set here.
         delete font.tables.gpos;
         delete font.tables.gsub;
         delete font.tables.gdef;

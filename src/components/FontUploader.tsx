@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import * as opentype from 'opentype.js';
 import { Upload, FileType, CheckCircle, Info, FolderOpen, Sliders, Wand2, CopyCheck } from 'lucide-react';
 import { FontMetadata, VietnameseProjectFile } from '../types';
+import { parseFontResilient } from '../utils';
 
 interface FontUploaderProps {
   onFontLoaded: (font: opentype.Font, filename: string, metadata: FontMetadata, rawBuffer: ArrayBuffer) => void;
@@ -118,7 +119,13 @@ export const FontUploader: React.FC<FontUploaderProps> = ({
       reader.onload = async (e) => {
         try {
           const buffer = e.target?.result as ArrayBuffer;
-          const font = opentype.parse(buffer);
+
+          // parseFontResilient falls back to dropping broken GPOS/GSUB/GDEF/kern tables
+          // so that fonts exported by older builds of this app can still be re-opened.
+          const { font, degraded } = parseFontResilient(buffer);
+          if (degraded) {
+            console.warn('Font has damaged layout tables (GPOS/GSUB/GDEF/kern). They were dropped in order to load the outlines.');
+          }
           
           // Retrieve metadata safely
           const family = getFontName(font, 'fontFamily', 'Không rõ');

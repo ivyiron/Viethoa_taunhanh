@@ -1095,84 +1095,12 @@ function calculateTableChecksum(data: Uint8Array): number {
 }
 
 /**
- * Builds a binary legacy 'kern' table (format 0, version 0) from font.kerningPairs.
- * This legacy table is essential for modern web browsers when GPOS is omitted,
- * allowing perfect kerning for both standard and custom Vietnamese character pairs.
+ * Collects and normalizes kerning pairs from font.kerningPairs,
+ * grouped by left glyph index and sorted by right glyph index.
  */
-export function buildKernTable(font: any): Uint8Array {
-  const pairs: { left: number; right: number; value: number }[] = [];
-  if (font && font.kerningPairs) {
-    for (const [key, val] of Object.entries(font.kerningPairs)) {
-      const parts = key.split(',');
-      if (parts.length !== 2) continue;
-      const left = parseInt(parts[0], 10);
-      const right = parseInt(parts[1], 10);
-      if (isNaN(left) || isNaN(right)) continue;
-      if (typeof val === 'number' && val !== 0) {
-        pairs.push({ left, right, value: val });
-      }
-    }
-  }
-
-  // Sort by left glyph index, then right glyph index as mandated by the TrueType specification
-  pairs.sort((a, b) => {
-    if (a.left !== b.left) {
-      return a.left - b.left;
-    }
-    return a.right - b.right;
-  });
-
-  const nPairs = pairs.length;
-  const subtableSize = 14 + 6 * nPairs;
-  const totalSize = 4 + subtableSize;
-
-  const buffer = new ArrayBuffer(totalSize);
-  const view = new DataView(buffer);
-
-  // Main header
-  view.setUint16(0, 0); // version 0
-  view.setUint16(2, 1); // 1 subtable
-
-  // Subtable header
-  view.setUint16(4, 0); // subtable version 0
-  view.setUint16(6, subtableSize); // length of subtable
-  view.setUint16(8, 1); // coverage format 0 (horizontal)
-
-  // Format 0 search values
-  const maxPowerOf2 = nPairs > 0 ? Math.pow(2, Math.floor(Math.log2(nPairs))) : 0;
-  const searchRange = maxPowerOf2 * 6;
-  const entrySelector = nPairs > 0 ? Math.floor(Math.log2(maxPowerOf2)) : 0;
-  const rangeShift = (nPairs - maxPowerOf2) * 6;
-
-  view.setUint16(10, nPairs);
-  view.setUint16(12, searchRange);
-  view.setUint16(14, entrySelector);
-  view.setUint16(16, rangeShift);
-
-  // Pairs records
-  let offset = 18;
-  for (let i = 0; i < nPairs; i++) {
-    const pair = pairs[i];
-    view.setUint16(offset, pair.left);
-    view.setUint16(offset + 2, pair.right);
-    view.setInt16(offset + 4, pair.value);
-    offset += 6;
-  }
-
-  return new Uint8Array(buffer);
-}
-
-/**
- * Builds a binary OpenType GPOS table (Format 1 Pair Adjustment) from font.kerningPairs.
- * Modern browsers (Chrome/Blink/HarfBuzz, Firefox, Safari) require a GPOS table with 
- * 'kern' feature enabled to apply CSS kerning (font-kerning: normal / font-feature-settings: "kern" 1).
- */
-export function buildGPOSTable(font: any): Uint8Array {
-  if (!font || !font.kerningPairs) {
-    return new Uint8Array(0);
-  }
-
+function collectKerningPairs(font: any): Map<number, { right: number; value: number }[]> {
   const leftToPairs = new Map<number, { right: number; value: number }[]>();
+  if (!font || !font.kerningPairs) return leftToPairs;
 
   for (const [key, val] of Object.entries(font.kerningPairs)) {
     if (typeof val !== 'number' || val === 0) continue;
@@ -1181,176 +1109,341 @@ export function buildGPOSTable(font: any): Uint8Array {
     const left = parseInt(parts[0], 10);
     const right = parseInt(parts[1], 10);
     if (isNaN(left) || isNaN(right) || left <= 0 || right <= 0) continue;
+    if (left > 0xFFFF || right > 0xFFFF) continue;
 
-    if (!leftToPairs.has(left)) {
-      leftToPairs.set(left, []);
-    }
-    leftToPairs.get(left)!.push({ right, value: val });
+    const clamped = Math.max(-32768, Math.min(32767, Math.round(val)));
+    if (!leftToPairs.has(left)) leftToPairs.set(left, []);
+    leftToPairs.get(left)!.push({ right, value: clamped });
   }
 
-  const sortedLeftGlyphs = Array.from(leftToPairs.keys()).sort((a, b) => a - b);
-  if (sortedLeftGlyphs.length === 0) {
-    return new Uint8Array(0);
+  for (const list of leftToPairs.values()) {
+    list.sort((a, b) => a.right - b.right);
+  }
+  return leftToPairs;
+}
+
+/**
+ * Builds a binary legacy 'kern' table (format 0, version 0) from font.kerningPairs.
+ *
+ * IMPORTANT: both nPairs and subtableLength are uint16, so a single subtable cannot
+ * hold more than ~10.900 pairs. A Vietnamese build routinely produces 20.000 - 80.000
+ * pairs (class-based kerning expanded to individual pairs, then cloned onto 134 new
+ * glyphs), which used to silently wrap around and corrupt the table.
+ * The pairs are therefore split across several format 0 subtables.
+ */
+export function buildKernTable(font: any): Uint8Array {
+  const leftToPairs = collectKerningPairs(font);
+
+  const flat: { left: number; right: number; value: number }[] = [];
+  for (const [left, list] of leftToPairs) {
+    for (const p of list) flat.push({ left, right: p.right, value: p.value });
+  }
+  if (flat.length === 0) return new Uint8Array(0);
+
+  // Sort by left glyph index, then right glyph index as mandated by the TrueType specification
+  flat.sort((a, b) => (a.left !== b.left ? a.left - b.left : a.right - b.right));
+
+  const MAX_PAIRS_PER_SUBTABLE = 10000; // 14 + 6 * 10000 = 60.014 < 65.536
+  const groups: { left: number; right: number; value: number }[][] = [];
+  for (let i = 0; i < flat.length; i += MAX_PAIRS_PER_SUBTABLE) {
+    groups.push(flat.slice(i, i + MAX_PAIRS_PER_SUBTABLE));
   }
 
-  // Sort each left glyph's right pairs by right glyph index ascending
-  for (const leftGlyph of sortedLeftGlyphs) {
-    leftToPairs.get(leftGlyph)!.sort((a, b) => a.right - b.right);
-  }
-
-  const numLeft = sortedLeftGlyphs.length;
-
-  let totalPairSetBytes = 0;
-  for (const leftGlyph of sortedLeftGlyphs) {
-    const pairs = leftToPairs.get(leftGlyph)!;
-    totalPairSetBytes += 2 + 4 * pairs.length;
-  }
-
-  // Exact OpenType GPOS Table Offsets:
-  // GPOS Header: 10 bytes (scriptList=10, featureList=48, lookupList=62)
-  // ScriptList Table: 14 bytes (scriptCount=2, DFLT record, latn record) -> offset 10..23
-  // DFLT Script Table: 4 bytes -> offset 24..27
-  // DFLT LangSys Table: 8 bytes -> offset 28..35
-  // latn Script Table: 4 bytes -> offset 36..39
-  // latn LangSys Table: 8 bytes -> offset 40..47
-  // FeatureList Table: 8 bytes (featureCount=1, FeatureRecord[0] 'kern' offset 8) -> offset 48..55
-  // Feature Table 'kern': 6 bytes -> offset 56..61
-  // LookupList Table: 4 bytes (lookupCount=1, lookupOffsets[0]=4) -> offset 62..65
-  // Lookup Table 0: 8 bytes (lookupType=2, lookupFlag=0, subTableCount=1, subTableOffset[0]=8) -> offset 66..73
-  // Subtable starts at offset 74 (subtableBase = 74):
-  //   Subtable Header: 10 bytes (posFormat=1, coverageOffset, valueFormat1=0x0004, valueFormat2=0, pairSetCount=numLeft) -> 74..83
-  //   pairSetOffsets: 2 * numLeft bytes -> 84 .. (84 + 2 * numLeft - 1)
-  //   Coverage Table: 4 + 2 * numLeft bytes
-  //   PairSet Tables: totalPairSetBytes
-  const headerSize = 74;
-  const pairPosSubtableSize = (10 + 2 * numLeft) + (4 + 2 * numLeft) + totalPairSetBytes;
-  const totalGposSize = headerSize + pairPosSubtableSize;
-
-  const buffer = new ArrayBuffer(totalGposSize);
+  const totalSize = 4 + groups.reduce((sum, g) => sum + 14 + 6 * g.length, 0);
+  const buffer = new ArrayBuffer(totalSize);
   const view = new DataView(buffer);
 
-  // --- 1. GPOS Header (10 bytes) ---
-  const scriptListOffset = 10;
-  const featureListOffset = 48;
-  const lookupListOffset = 62;
+  // Main header
+  view.setUint16(0, 0);              // version 0
+  view.setUint16(2, groups.length);  // number of subtables
 
-  view.setUint16(0, 1); // majorVersion = 1
-  view.setUint16(2, 0); // minorVersion = 0
-  view.setUint16(4, scriptListOffset); // 10
-  view.setUint16(6, featureListOffset); // 48
-  view.setUint16(8, lookupListOffset); // 62
+  let offset = 4;
+  for (const group of groups) {
+    const nPairs = group.length;
+    const subtableSize = 14 + 6 * nPairs;
 
-  // --- 2. ScriptList Table (offset 10) ---
-  let o = scriptListOffset;
-  view.setUint16(o, 2); o += 2; // scriptCount = 2 (DFLT, latn)
+    // Subtable header
+    view.setUint16(offset, 0);             // subtable version 0
+    view.setUint16(offset + 2, subtableSize);
+    view.setUint16(offset + 4, 1);         // coverage: horizontal, format 0
 
-  // ScriptRecord 0: 'DFLT' -> points to DFLT Script Table at offset 24 (24 - 10 = 14)
-  view.setUint8(o, 'D'.charCodeAt(0));
-  view.setUint8(o + 1, 'F'.charCodeAt(0));
-  view.setUint8(o + 2, 'L'.charCodeAt(0));
-  view.setUint8(o + 3, 'T'.charCodeAt(0));
-  view.setUint16(o + 4, 14);
-  o += 6;
+    // Format 0 search values
+    const maxPowerOf2 = Math.pow(2, Math.floor(Math.log2(nPairs)));
+    view.setUint16(offset + 6, nPairs);
+    view.setUint16(offset + 8, maxPowerOf2 * 6);
+    view.setUint16(offset + 10, Math.floor(Math.log2(maxPowerOf2)));
+    view.setUint16(offset + 12, (nPairs - maxPowerOf2) * 6);
 
-  // ScriptRecord 1: 'latn' -> points to latn Script Table at offset 36 (36 - 10 = 26)
-  view.setUint8(o, 'l'.charCodeAt(0));
-  view.setUint8(o + 1, 'a'.charCodeAt(0));
-  view.setUint8(o + 2, 't'.charCodeAt(0));
-  view.setUint8(o + 3, 'n'.charCodeAt(0));
-  view.setUint16(o + 4, 26);
-  o += 6;
+    // Pair records
+    let q = offset + 14;
+    for (const pair of group) {
+      view.setUint16(q, pair.left);
+      view.setUint16(q + 2, pair.right);
+      view.setInt16(q + 4, pair.value);
+      q += 6;
+    }
+    offset += subtableSize;
+  }
 
-  // DFLT Script Table (offset 24)
-  view.setUint16(o, 4); // defaultLangSysOffset = 4 (24 + 4 = 28)
-  view.setUint16(o + 2, 0); // langSysCount = 0
-  o += 4;
-  // DFLT LangSys Table (offset 28)
-  view.setUint16(o, 0); // lookupOrder = 0
-  view.setUint16(o + 2, 0xFFFF); // reqFeatureIndex = none
-  view.setUint16(o + 4, 1); // featureIndexCount = 1
-  view.setUint16(o + 6, 0); // featureIndices[0] = 0 ('kern')
-  o += 8;
+  return new Uint8Array(buffer);
+}
 
-  // latn Script Table (offset 36)
-  view.setUint16(o, 4); // defaultLangSysOffset = 4 (36 + 4 = 40)
-  view.setUint16(o + 2, 0); // langSysCount = 0
-  o += 4;
-  // latn LangSys Table (offset 40)
-  view.setUint16(o, 0); // lookupOrder = 0
-  view.setUint16(o + 2, 0xFFFF); // reqFeatureIndex = none
-  view.setUint16(o + 4, 1); // featureIndexCount = 1
-  view.setUint16(o + 6, 0); // featureIndices[0] = 0 ('kern')
-  o += 8;
+// Every offset inside a PairPos subtable is a uint16, so one subtable must stay
+// below 65.536 bytes. Keep a safety margin.
+const MAX_PAIRPOS_SUBTABLE_BYTES = 60000;
 
-  // --- 3. FeatureList Table (offset 48) ---
-  o = featureListOffset;
-  view.setUint16(o, 1); o += 2; // featureCount = 1
-  // FeatureRecord[0]: 'kern' -> points to Feature Table at offset 56 (56 - 48 = 8)
-  view.setUint8(o, 'k'.charCodeAt(0));
-  view.setUint8(o + 1, 'e'.charCodeAt(0));
-  view.setUint8(o + 2, 'r'.charCodeAt(0));
-  view.setUint8(o + 3, 'n'.charCodeAt(0));
-  view.setUint16(o + 4, 8);
-  o += 6;
-  // Feature Table (offset 56)
-  view.setUint16(o, 0); // featureParamsOffset = 0
-  view.setUint16(o + 2, 1); // lookupCount = 1
-  view.setUint16(o + 4, 0); // lookupListIndex[0] = 0
-  o += 6;
+/**
+ * Splits left glyphs into groups so that each PairPos subtable stays under 64 KB.
+ */
+function chunkLeftGlyphs(leftToPairs: Map<number, { right: number; value: number }[]>): number[][] {
+  const sortedLeft = Array.from(leftToPairs.keys()).sort((a, b) => a - b);
+  const chunks: number[][] = [];
+  let current: number[] = [];
+  let currentBytes = 14; // 10 bytes subtable header + 4 bytes coverage header
 
-  // --- 4. LookupList Table (offset 62) ---
-  o = lookupListOffset;
-  view.setUint16(o, 1); o += 2; // lookupCount = 1
-  view.setUint16(o, 4); o += 2; // lookupOffset[0] = 4 (62 + 4 = 66)
-  // Lookup Table[0] (offset 66)
-  view.setUint16(o, 2); // lookupType = 2 (Pair Adjustment)
-  view.setUint16(o + 2, 0); // lookupFlag = 0
-  view.setUint16(o + 4, 1); // subTableCount = 1
-  view.setUint16(o + 6, 8); // subTableOffset[0] = 8 (66 + 8 = 74)
-  o += 8;
+  for (const g of sortedLeft) {
+    const pairs = leftToPairs.get(g)!;
+    // 2 (pairSetOffset) + 2 (coverage glyph) + 2 (pairValueCount) + 4 per pair
+    const cost = 6 + 4 * pairs.length;
+    if (current.length > 0 && currentBytes + cost > MAX_PAIRPOS_SUBTABLE_BYTES) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 14;
+    }
+    current.push(g);
+    currentBytes += cost;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
 
-  // --- 5. PairPos Subtable (Format 1) (starts at offset 74) ---
-  const subtableBase = o; // 74
-  view.setUint16(o, 1); // posFormat = 1
-  const coverageRelOffset = 10 + 2 * numLeft;
-  view.setUint16(o + 2, coverageRelOffset); // coverageOffset
-  view.setUint16(o + 4, 0x0004); // valueFormat1 = XAdvance
-  view.setUint16(o + 6, 0x0000); // valueFormat2 = 0
-  view.setUint16(o + 8, numLeft); // pairSetCount
-  o += 10;
+/**
+ * Serializes one PairPos Format 1 subtable for the given left glyphs.
+ */
+function buildPairPosSubtable(
+  leftGlyphs: number[],
+  leftToPairs: Map<number, { right: number; value: number }[]>
+): Uint8Array {
+  const numLeft = leftGlyphs.length;
+  let totalPairSetBytes = 0;
+  for (const g of leftGlyphs) totalPairSetBytes += 2 + 4 * leftToPairs.get(g)!.length;
 
-  const pairSetOffsetsOffset = o; // 84
+  const size = (10 + 2 * numLeft) + (4 + 2 * numLeft) + totalPairSetBytes;
+  const buffer = new ArrayBuffer(size);
+  const view = new DataView(buffer);
+
+  view.setUint16(0, 1);                // posFormat = 1
+  view.setUint16(2, 10 + 2 * numLeft); // coverageOffset
+  view.setUint16(4, 0x0004);           // valueFormat1 = XAdvance
+  view.setUint16(6, 0x0000);           // valueFormat2 = 0
+  view.setUint16(8, numLeft);          // pairSetCount
+
+  let o = 10;
+  const pairSetOffsetsAt = o;
   o += 2 * numLeft;
 
-  // --- 6. Coverage Table (Format 1) ---
-  view.setUint16(o, 1); // coverageFormat = 1
-  view.setUint16(o + 2, numLeft); // glyphCount
+  // Coverage table (format 1)
+  view.setUint16(o, 1);
+  view.setUint16(o + 2, numLeft);
   o += 4;
-
   for (let i = 0; i < numLeft; i++) {
-    view.setUint16(o, sortedLeftGlyphs[i]);
+    view.setUint16(o, leftGlyphs[i]);
     o += 2;
   }
 
-  // --- 7. PairSet Tables ---
+  // PairSet tables
   for (let i = 0; i < numLeft; i++) {
-    const leftGlyph = sortedLeftGlyphs[i];
-    const pairs = leftToPairs.get(leftGlyph)!;
-    
-    const pairSetRelOffset = o - subtableBase;
-    view.setUint16(pairSetOffsetsOffset + 2 * i, pairSetRelOffset);
-
-    view.setUint16(o, pairs.length); // pairValueCount
+    const pairs = leftToPairs.get(leftGlyphs[i])!;
+    if (o > 0xFFFF) {
+      throw new Error('PairPos subtable exceeded 64KB - chunking logic is broken');
+    }
+    view.setUint16(pairSetOffsetsAt + 2 * i, o);
+    view.setUint16(o, pairs.length);
     o += 2;
-
     for (const pair of pairs) {
-      view.setUint16(o, pair.right); // secondGlyph
-      view.setInt16(o + 2, pair.value); // xAdvance adjustment
+      view.setUint16(o, pair.right);
+      view.setInt16(o + 2, pair.value);
       o += 4;
     }
   }
 
   return new Uint8Array(buffer);
+}
+
+/**
+ * Builds a binary OpenType GPOS table (Pair Adjustment) from font.kerningPairs.
+ * Modern browsers (Chrome/Blink/HarfBuzz, Firefox, Safari) require a GPOS table with
+ * 'kern' feature enabled to apply CSS kerning (font-kerning: normal / font-feature-settings: "kern" 1).
+ *
+ * IMPORTANT: a PairPos subtable addresses its internal content with uint16 offsets, so it cannot
+ * exceed 64 KB. Vietnamese builds regularly produce 100 KB - 400 KB of kerning data, which
+ * used to wrap around silently and produce a corrupt GPOS table (the font still installed in
+ * Windows, but opentype.js refused to re-open it).
+ * The pairs are therefore split into several PairPos subtables, each wrapped in a
+ * lookup type 9 (Extension Positioning) whose offset is 32-bit.
+ */
+export function buildGPOSTable(font: any): Uint8Array {
+  const leftToPairs = collectKerningPairs(font);
+  if (leftToPairs.size === 0) return new Uint8Array(0);
+
+  const chunks = chunkLeftGlyphs(leftToPairs);
+  const subtables = chunks.map(c => buildPairPosSubtable(c, leftToPairs));
+  const numLookups = subtables.length;
+
+  // Layout:
+  //   GPOS Header      : 10 bytes
+  //   ScriptList       : offset 10, 38 bytes (DFLT + latn) -> 10..47
+  //   FeatureList      : offset 48, 2 + 6 + (6 + 2 * numLookups) bytes
+  //   LookupList       : 2 + 2 * numLookups + 16 * numLookups bytes
+  //                      (each Lookup is 8 bytes + an 8 byte ExtensionPos subtable)
+  //   PairPos subtables: appended at the end, addressed with 32-bit extension offsets
+  const scriptListOffset = 10;
+  const featureListOffset = 48;
+  const featureListSize = 2 + 6 + (6 + 2 * numLookups);
+  const lookupListOffset = featureListOffset + featureListSize;
+  const lookupListSize = 2 + 2 * numLookups + numLookups * 16;
+
+  const subtableOffsets: number[] = [];
+  let totalSize = lookupListOffset + lookupListSize;
+  for (const st of subtables) {
+    totalSize = Math.ceil(totalSize / 2) * 2; // keep 16-bit alignment
+    subtableOffsets.push(totalSize);
+    totalSize += st.length;
+  }
+
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const writeTag = (off: number, tag: string) => {
+    for (let i = 0; i < 4; i++) view.setUint8(off + i, tag.charCodeAt(i));
+  };
+
+  // --- 1. GPOS Header ---
+  view.setUint16(0, 1); // majorVersion
+  view.setUint16(2, 0); // minorVersion
+  view.setUint16(4, scriptListOffset);
+  view.setUint16(6, featureListOffset);
+  view.setUint16(8, lookupListOffset);
+
+  // --- 2. ScriptList (DFLT + latn) ---
+  let o = scriptListOffset;
+  view.setUint16(o, 2); o += 2;          // scriptCount
+  writeTag(o, 'DFLT'); view.setUint16(o + 4, 14); o += 6;
+  writeTag(o, 'latn'); view.setUint16(o + 4, 26); o += 6;
+  // DFLT Script Table + LangSys
+  view.setUint16(o, 4); view.setUint16(o + 2, 0); o += 4;
+  view.setUint16(o, 0); view.setUint16(o + 2, 0xFFFF);
+  view.setUint16(o + 4, 1); view.setUint16(o + 6, 0); o += 8;
+  // latn Script Table + LangSys
+  view.setUint16(o, 4); view.setUint16(o + 2, 0); o += 4;
+  view.setUint16(o, 0); view.setUint16(o + 2, 0xFFFF);
+  view.setUint16(o + 4, 1); view.setUint16(o + 6, 0); o += 8;
+
+  // --- 3. FeatureList: a single 'kern' feature referencing every lookup ---
+  o = featureListOffset;
+  view.setUint16(o, 1); o += 2;          // featureCount
+  writeTag(o, 'kern'); view.setUint16(o + 4, 8); o += 6;
+  view.setUint16(o, 0);                  // featureParamsOffset
+  view.setUint16(o + 2, numLookups);     // lookupIndexCount
+  o += 4;
+  for (let i = 0; i < numLookups; i++) {
+    view.setUint16(o, i);
+    o += 2;
+  }
+
+  // --- 4. LookupList: each lookup is type 9 (Extension) wrapping a type 2 PairPos ---
+  view.setUint16(lookupListOffset, numLookups);
+  const lookupBase = lookupListOffset + 2 + 2 * numLookups;
+  for (let i = 0; i < numLookups; i++) {
+    const lookupOffset = lookupBase + i * 16;
+    view.setUint16(lookupListOffset + 2 + 2 * i, lookupOffset - lookupListOffset);
+
+    view.setUint16(lookupOffset, 9);     // lookupType = Extension Positioning
+    view.setUint16(lookupOffset + 2, 0); // lookupFlag
+    view.setUint16(lookupOffset + 4, 1); // subTableCount
+    view.setUint16(lookupOffset + 6, 8); // subTableOffset
+
+    const ext = lookupOffset + 8;
+    view.setUint16(ext, 1);              // posFormat = 1
+    view.setUint16(ext + 2, 2);          // extensionLookupType = 2 (Pair Adjustment)
+    view.setUint32(ext + 4, subtableOffsets[i] - ext); // 32-bit offset, cannot overflow
+  }
+
+  // --- 5. PairPos subtables ---
+  for (let i = 0; i < numLookups; i++) {
+    bytes.set(subtables[i], subtableOffsets[i]);
+  }
+
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Rebuilds an sfnt buffer without the given tables.
+ */
+function stripFontTables(buffer: ArrayBuffer, drop: string[]): ArrayBuffer {
+  const view = new DataView(buffer);
+  const numTables = view.getUint16(4);
+  const entries: { tag: string; data: Uint8Array }[] = [];
+
+  for (let i = 0; i < numTables; i++) {
+    const o = 12 + i * 16;
+    const tag = String.fromCharCode(
+      view.getUint8(o), view.getUint8(o + 1), view.getUint8(o + 2), view.getUint8(o + 3)
+    );
+    if (drop.includes(tag)) continue;
+    const start = view.getUint32(o + 8);
+    const length = view.getUint32(o + 12);
+    entries.push({ tag, data: new Uint8Array(buffer.slice(start, start + length)) });
+  }
+
+  entries.sort((a, b) => (a.tag < b.tag ? -1 : 1));
+  const n = entries.length;
+
+  let maxPowerOf2 = 1;
+  while (maxPowerOf2 * 2 <= n) maxPowerOf2 *= 2;
+
+  let offset = 12 + n * 16;
+  const offsets = entries.map(e => {
+    const start = offset;
+    offset += Math.ceil(e.data.length / 4) * 4;
+    return start;
+  });
+
+  const output = new ArrayBuffer(offset);
+  const outView = new DataView(output);
+  const outBytes = new Uint8Array(output);
+
+  outView.setUint32(0, view.getUint32(0));
+  outView.setUint16(4, n);
+  outView.setUint16(6, maxPowerOf2 * 16);
+  outView.setUint16(8, Math.log2(maxPowerOf2));
+  outView.setUint16(10, n * 16 - maxPowerOf2 * 16);
+
+  entries.forEach((e, i) => {
+    const rec = 12 + i * 16;
+    for (let j = 0; j < 4; j++) outView.setUint8(rec + j, e.tag.charCodeAt(j));
+    outView.setUint32(rec + 4, 0);
+    outView.setUint32(rec + 8, offsets[i]);
+    outView.setUint32(rec + 12, e.data.length);
+    outBytes.set(e.data, offsets[i]);
+  });
+
+  return output;
+}
+
+/**
+ * Parses a font, tolerating broken advanced layout tables.
+ * Fonts exported by older builds of this app carry a corrupt GPOS table and make
+ * opentype.parse() throw; dropping the layout tables lets them be re-opened.
+ * Returns degraded = true when the fallback path was used.
+ */
+export function parseFontResilient(buffer: ArrayBuffer): { font: opentype.Font; degraded: boolean } {
+  try {
+    return { font: opentype.parse(buffer.slice(0)), degraded: false };
+  } catch (err) {
+    const cleaned = stripFontTables(buffer, ['GPOS', 'GSUB', 'GDEF', 'BASE', 'kern']);
+    return { font: opentype.parse(cleaned), degraded: true };
+  }
 }
 
 /**
