@@ -25,7 +25,7 @@ import {
 import { AutoKerningStudio } from './components/AutoKerningStudio';
 import { HelpGuideModal } from './components/HelpGuideModal';
 import { generateFullFontKerningPairs, calculateAutoSpacingAdjustments, findGlyphIndex, applySpacingDelta } from './utils/kerningEngine';
-import { ensureCombiningMarkGlyphs, buildCcmpRules, addCcmpFeature, updateOS2ForVietnamese } from './utils/fontFeatures';
+import { ensureCombiningMarkGlyphs, buildCcmpRules, addCcmpFeature, updateOS2ForVietnamese, prepareGsubForWrite, verifyGsubRoundTrip } from './utils/fontFeatures';
 import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2, FolderDown, FolderOpen, SlidersHorizontal } from 'lucide-react';
 
 const DEFAULT_SPACING_RULES: AutoSpacingRules = {
@@ -560,27 +560,57 @@ export default function App() {
       updateOS2ForVietnamese(font);
 
       // Build a 'ccmp' feature so decomposed input (e + U+0302 + U+0301) renders through the
-      // precomposed glyph. Combining mark glyphs are added first when the font lacks them,
-      // otherwise the shaper has nothing to match against.
-      ensureCombiningMarkGlyphs(font, templates, rules);
-      const ccmpRules = buildCcmpRules(font);
-      const ccmpInstalled = addCcmpFeature(font, ccmpRules);
+      // precomposed glyph. This requires keeping the parsed GSUB so opentype.js writes the
+      // original features together with ccmp - but opentype.js cannot serialize every GSUB,
+      // so only attempt it when the table is provably writable without losing anything.
+      const originalGsubTags = Array.isArray(font.tables?.gsub?.features)
+        ? font.tables.gsub.features.map((f: any) => f.tag)
+        : [];
+      const originalLookupCount = Array.isArray(font.tables?.gsub?.lookups)
+        ? font.tables.gsub.lookups.length
+        : 0;
+
+      const gsubCheck = prepareGsubForWrite(font);
+      let ccmpInstalled = 0;
+
+      if (gsubCheck.ok) {
+        ensureCombiningMarkGlyphs(font, templates, rules);
+        ccmpInstalled = addCcmpFeature(font, buildCcmpRules(font));
+      } else {
+        console.info('ccmp skipped, original GSUB copied verbatim instead:', gsubCheck.reason);
+      }
 
       if (font.tables) {
         // NOTE: bit 6 of head.flags must stay 0 per the OpenType spec. OVERLAP_SIMPLE is a
         // per-glyph flag inside the 'glyf' table, not a head flag, so it is not set here.
         delete font.tables.gpos;
         delete font.tables.gdef;
-        // GSUB is kept so opentype.js serializes the original features together with ccmp.
-        // If no ccmp rule could be built there is nothing to merge, so fall back to copying
-        // the pristine GSUB bytes in injectAdvancedLayoutTables instead.
+        // With no ccmp to merge there is nothing to gain from re-serializing GSUB, so drop it
+        // and let injectAdvancedLayoutTables copy the pristine bytes as before.
         if (ccmpInstalled === 0) {
           delete font.tables.gsub;
         }
       }
 
       // Write font tables to binary OpenType ArrayBuffer
-      let buffer = font.toArrayBuffer();
+      let buffer: ArrayBuffer;
+      try {
+        buffer = font.toArrayBuffer();
+
+        // Confirm nothing was dropped on the way out; if it was, fall through to the fallback
+        if (ccmpInstalled > 0) {
+          const expected = [...originalGsubTags, 'ccmp'];
+          if (!verifyGsubRoundTrip(buffer, expected, originalLookupCount + 1)) {
+            throw new Error('GSUB round-trip verification failed');
+          }
+        }
+      } catch (gsubErr: any) {
+        if (ccmpInstalled === 0) throw gsubErr;
+        console.warn('Falling back to the original GSUB (ccmp disabled):', gsubErr?.message);
+        delete font.tables.gsub;
+        ccmpInstalled = 0;
+        buffer = font.toArrayBuffer();
+      }
       
       // Build standard 'kern' table and OpenType GPOS table for full cross-browser kerning support
       const kernTableBytes = buildKernTable(font);

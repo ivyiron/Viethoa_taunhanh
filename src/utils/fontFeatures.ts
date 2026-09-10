@@ -279,6 +279,115 @@ export function ensureCombiningMarkGlyphs(
 // ccmp FEATURE
 // ============================================================================
 
+export interface GsubWriteCheck {
+  ok: boolean;
+  reason?: string;
+  flattenedExtensions: number;
+  repairedScripts: number;
+}
+
+/**
+ * opentype.js can only serialize GSUB lookup types 1-6, requires every script to carry a
+ * default language system, and silently drops the FeatureVariations of a version 1.1 table.
+ * Retaining GSUB so ccmp can be merged into it is therefore only safe for some fonts.
+ *
+ * This makes the table writable where that is possible without losing anything:
+ *   - lookup type 7 (Extension Substitution) is flattened to the type it wraps. Extension is
+ *     purely a 32-bit-offset device, so the inner lookup is an exact equivalent.
+ *   - a script missing its default language system gets one, seeded from its first language
+ *     system record.
+ * and reports ok:false when the table cannot be rewritten faithfully, so the caller can fall
+ * back to copying the original GSUB bytes and skip ccmp.
+ *
+ * Mutates font.tables.gsub. That is harmless: on the fallback path the table is discarded.
+ */
+export function prepareGsubForWrite(font: any): GsubWriteCheck {
+  const result: GsubWriteCheck = { ok: true, flattenedExtensions: 0, repairedScripts: 0 };
+
+  const gsub = font?.tables?.gsub;
+  if (!gsub) return result;
+
+  // Version 1.1 carries a FeatureVariations table that the writer does not emit
+  if (gsub.version !== 1 || gsub.variations) {
+    return { ...result, ok: false, reason: 'GSUB uses feature variations (version 1.1)' };
+  }
+
+  if (!Array.isArray(gsub.lookups) || !Array.isArray(gsub.scripts) || !Array.isArray(gsub.features)) {
+    return { ...result, ok: false, reason: 'GSUB structure is not recognisable' };
+  }
+
+  // --- Flatten Extension Substitution lookups ---
+  for (const lookup of gsub.lookups) {
+    if (lookup.lookupType !== 7) continue;
+
+    const subtables = lookup.subtables || [];
+    if (subtables.length === 0) {
+      return { ...result, ok: false, reason: 'empty Extension Substitution lookup' };
+    }
+
+    const innerTypes = new Set(subtables.map((s: any) => s.lookupType));
+    if (innerTypes.size !== 1) {
+      return { ...result, ok: false, reason: 'Extension lookup mixes substitution types' };
+    }
+
+    const innerType = subtables[0].lookupType;
+    if (subtables.some((s: any) => !s.extension)) {
+      return { ...result, ok: false, reason: 'Extension lookup has no inner subtable' };
+    }
+
+    lookup.lookupType = innerType;
+    lookup.subtables = subtables.map((s: any) => s.extension);
+    result.flattenedExtensions++;
+  }
+
+  const unsupported = gsub.lookups
+    .map((l: any) => l.lookupType)
+    .filter((t: number) => !(t >= 1 && t <= 6));
+  if (unsupported.length > 0) {
+    return { ...result, ok: false, reason: `unsupported GSUB lookup type ${unsupported[0]}` };
+  }
+
+  // --- Give every script a default language system ---
+  for (const record of gsub.scripts) {
+    const script = record?.script;
+    if (!script || script.defaultLangSys) continue;
+
+    const first = Array.isArray(script.langSysRecords) ? script.langSysRecords[0]?.langSys : null;
+    script.defaultLangSys = {
+      reserved: 0,
+      reqFeatureIndex: typeof first?.reqFeatureIndex === 'number' ? first.reqFeatureIndex : 0xFFFF,
+      featureIndexes: Array.isArray(first?.featureIndexes) ? first.featureIndexes.slice() : []
+    };
+    result.repairedScripts++;
+  }
+
+  return result;
+}
+
+/**
+ * Re-reads a compiled buffer and confirms the GSUB it carries still holds every feature the
+ * original font had, plus ccmp. Guards against the serializer quietly dropping something.
+ */
+export function verifyGsubRoundTrip(
+  buffer: ArrayBuffer,
+  expectedTags: string[],
+  expectedLookupCount: number
+): boolean {
+  try {
+    const written = opentype.parse(buffer.slice(0)) as any;
+    const gsub = written?.tables?.gsub;
+    if (!gsub || !Array.isArray(gsub.features) || !Array.isArray(gsub.lookups)) return false;
+    if (gsub.lookups.length !== expectedLookupCount) return false;
+
+    const got = gsub.features.map((f: any) => f.tag).sort();
+    const want = expectedTags.slice().sort();
+    if (got.length !== want.length) return false;
+    return got.every((tag: string, i: number) => tag === want[i]);
+  } catch {
+    return false;
+  }
+}
+
 export interface CcmpRule {
   sequence: number[]; // glyph indices, 2 or 3 long
   by: number;         // precomposed glyph index
@@ -373,16 +482,12 @@ export function addCcmpFeature(font: any, rules: CcmpRule[]): number {
   if (!font || rules.length === 0) return 0;
 
   if (!font.tables.gsub) {
+    const emptyLangSys = () => ({ reserved: 0, reqFeatureIndex: 0xFFFF, featureIndexes: [] as number[] });
     font.tables.gsub = {
       version: 1,
       scripts: [
-        {
-          tag: 'DFLT',
-          script: {
-            defaultLangSys: { reserved: 0, reqFeatureIndex: 0xFFFF, featureIndexes: [] },
-            langSysRecords: []
-          }
-        }
+        { tag: 'DFLT', script: { defaultLangSys: emptyLangSys(), langSysRecords: [] } },
+        { tag: 'latn', script: { defaultLangSys: emptyLangSys(), langSysRecords: [] } }
       ],
       features: [],
       lookups: []
