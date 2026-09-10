@@ -1839,6 +1839,35 @@ export const STEP2_RECIPES: ComponentRecipe[] = [
  * across plain Vietnamese base vowels (a, e, o, u, y, i vs A, E, O, U, Y, I).
  * This ensures diacritics sit at 100% consistent Y-levels across character groups.
  */
+export function getXHeightFromFont(font: any): number {
+  if (!font) return 500;
+
+  const measured: number[] = [];
+  for (const ch of ['x', 'a', 'e', 'o', 'u']) {
+    try {
+      const idx = font.charToGlyphIndex(ch);
+      if (idx > 0) {
+        const box = font.glyphs.get(idx)?.getBoundingBox();
+        if (box && box.y2 > 100) measured.push(box.y2);
+      }
+    } catch {
+      // ignore individual glyph failures
+    }
+  }
+
+  if (measured.length > 0) {
+    measured.sort((a, b) => a - b);
+    return measured[Math.floor(measured.length / 2)];
+  }
+
+  // NOTE: the OS/2 field is sxHeight. There is no sTypoXHeight - reading that name
+  // returned undefined for every font and silently fell through to a hardcoded 500.
+  const sxHeight = font.tables?.os2?.sxHeight;
+  if (typeof sxHeight === 'number' && sxHeight > 100) return sxHeight;
+
+  return Math.round((font.unitsPerEm || 1000) * 0.5);
+}
+
 export function getGroupReferenceHeights(font: opentype.Font | null): { xHeightMax: number; capHeightMax: number } {
   if (!font) return { xHeightMax: 500, capHeightMax: 700 };
 
@@ -2163,7 +2192,7 @@ export function composeGlyphPath(
           if (['â', 'ă', 'ê', 'ô'].includes(preCharLower)) {
             const unaccentedBaseChar = recipe.baseChar;
             const unaccentedGlyph = font.charToGlyph(unaccentedBaseChar);
-            let unaccentedTopY = font.tables?.os2?.sTypoXHeight || 500;
+            let unaccentedTopY = getXHeightFromFont(font);
             if (unaccentedGlyph && unaccentedGlyph.path && unaccentedGlyph.path.commands && unaccentedGlyph.path.commands.length > 0) {
               const uBox = unaccentedGlyph.getBoundingBox();
               unaccentedTopY = uBox.y2;
@@ -2735,7 +2764,7 @@ export function extractDiacriticFromComposedGlyph(font: any, diaId: string): any
       }
 
       const baseIdx = font.charToGlyphIndex(baseChar);
-      let baseBBox = { xMin: 50, xMax: 450, yMin: 0, yMax: font.tables?.os2?.sTypoXHeight || 500 };
+      let baseBBox = { xMin: 50, xMax: 450, yMin: 0, yMax: getXHeightFromFont(font) };
 
       let baseGlyph: any = null;
       if (baseIdx > 0) {
@@ -2937,7 +2966,7 @@ export function extractDiacriticFromSpecificChar(font: any, composedChar: string
   }
 
   const baseIdx = font.charToGlyphIndex(baseChar);
-  let baseBBox = { xMin: 50, xMax: 450, yMin: 0, yMax: font.tables?.os2?.sTypoXHeight || 500 };
+  let baseBBox = { xMin: 50, xMax: 450, yMin: 0, yMax: getXHeightFromFont(font) };
   let baseGlyph: any = null;
   if (baseIdx > 0) {
     baseGlyph = font.glyphs.get(baseIdx);

@@ -101,14 +101,34 @@ export function getGlyphContourPoints(glyph: opentype.Glyph): { x: number; y: nu
 
   let curX = 0;
   let curY = 0;
+  let startX = 0;
+  let startY = 0;
+
+  // Straight segments carry no intermediate control points, so sampling only their
+  // endpoints leaves the whole edge unmeasured. That matters most for V, A, W, Y, T and L
+  // - exactly the letters where kerning is decided - so lines are flattened like curves.
+  const sampleLine = (x0: number, y0: number, x1: number, y1: number) => {
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.max(1, Math.min(64, Math.round(len / 15)));
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      points.push({ x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t });
+    }
+  };
 
   glyph.path.commands.forEach((cmd: any) => {
     switch (cmd.type) {
       case 'M':
-      case 'L':
         curX = cmd.x;
         curY = cmd.y;
+        startX = curX;
+        startY = curY;
         points.push({ x: curX, y: curY });
+        break;
+      case 'L':
+        sampleLine(curX, curY, cmd.x, cmd.y);
+        curX = cmd.x;
+        curY = cmd.y;
         break;
       case 'Q': {
         const x0 = curX, y0 = curY;
@@ -137,6 +157,15 @@ export function getGlyphContourPoints(glyph: opentype.Glyph): { x: number; y: nu
         }
         curX = x3;
         curY = y3;
+        break;
+      }
+      case 'Z': {
+        // The implicit segment back to the contour start is an edge too
+        if (curX !== startX || curY !== startY) {
+          sampleLine(curX, curY, startX, startY);
+        }
+        curX = startX;
+        curY = startY;
         break;
       }
     }
@@ -280,25 +309,58 @@ export function getVietnameseVariantsMap(): Record<string, string[]> {
   return map;
 }
 
+// findGlyphIndex used to scan every glyph in the font on every call, and it is called twice
+// per kerning pair inside nested loops - tens of millions of glyph fetches on a large font.
+// The scan result is cached per font and rebuilt whenever the glyph count changes (which is
+// what happens when the Vietnamese glyphs are appended).
+const glyphIndexCache = new WeakMap<object, { count: number; byName: Map<string, number>; byCode: Map<number, number> }>();
+
+function getGlyphIndexMaps(font: any) {
+  const cached = glyphIndexCache.get(font);
+  if (cached && cached.count === font.glyphs.length) return cached;
+
+  const byName = new Map<string, number>();
+  const byCode = new Map<number, number>();
+
+  for (let i = 0; i < font.glyphs.length; i++) {
+    const g = font.glyphs.get(i);
+    if (!g) continue;
+    if (g.name && !byName.has(g.name)) byName.set(g.name, i);
+    if (typeof g.unicode === 'number' && !byCode.has(g.unicode)) byCode.set(g.unicode, i);
+    if (Array.isArray(g.unicodes)) {
+      for (const u of g.unicodes) {
+        if (!byCode.has(u)) byCode.set(u, i);
+      }
+    }
+  }
+
+  const entry = { count: font.glyphs.length, byName, byCode };
+  glyphIndexCache.set(font, entry);
+  return entry;
+}
+
+/**
+ * Drops the cached glyph lookup maps for a font. Call this after mutating glyphs in place
+ * without changing the glyph count (for example replacing an existing glyph's outline).
+ */
+export function invalidateGlyphIndexCache(font: opentype.Font): void {
+  glyphIndexCache.delete(font as unknown as object);
+}
+
 export function findGlyphIndex(font: opentype.Font, char: string): number {
   if (!font || !char) return 0;
 
   const code = char.codePointAt(0);
+  const maps = getGlyphIndexMaps(font as any);
 
-  // 1. Search font.glyphs array first by exact name or unicode to locate newly generated glyphs accurately
-  if (font.glyphs && font.glyphs.length) {
-    for (let i = 0; i < font.glyphs.length; i++) {
-      const g = font.glyphs.get(i);
-      if (g) {
-        if (g.name === char) {
-          return i;
-        }
-        if (code && (g.unicode === code || (g.unicodes && g.unicodes.includes(code)))) {
-          return i;
-        }
-      }
-    }
-  }
+  // 1. Locate newly generated glyphs by exact name or unicode.
+  //    The original scan walked glyphs in index order and returned the first match on
+  //    either criterion, so take the lower of the two hits to keep behaviour identical.
+  const byName = maps.byName.get(char);
+  const byCode = code !== undefined ? maps.byCode.get(code) : undefined;
+  if (byName !== undefined && byCode !== undefined) return Math.min(byName, byCode);
+  if (byName !== undefined) return byName;
+  if (byCode !== undefined) return byCode;
 
   // 2. Fallback to charToGlyphIndex
   const direct = font.charToGlyphIndex(char);
@@ -514,6 +576,13 @@ export function calculateAutoSpacingAdjustments(
 
   const roundLetters = new Set(['O', 'C', 'Q', 'G', 'o', 'c', 'e', '0', '8']);
 
+  // Strip Vietnamese diacritics so that ó, ô, ọ, ộ are tightened exactly like o.
+  // Without this, o and ó end up with different spacing inside the same font.
+  const toBaseLetter = (ch: string): string => {
+    const stripped = ch.normalize('NFD').replace(/[\u0300-\u036F]/g, '');
+    return stripped.length > 0 ? stripped[0] : ch;
+  };
+
   for (let i = 0; i < font.glyphs.length; i++) {
     try {
       const glyph = font.glyphs.get(i);
@@ -524,7 +593,7 @@ export function calculateAutoSpacingAdjustments(
       let delta = rules.globalTrackingOffset + presetMultiplier;
 
       // Tighten sidebearings on round glyphs optically
-      if (roundLetters.has(charStr)) {
+      if (roundLetters.has(toBaseLetter(charStr))) {
         delta -= Math.round((font.unitsPerEm || 1000) * 0.02 * curveFactor);
       }
 
@@ -537,4 +606,30 @@ export function calculateAutoSpacingAdjustments(
   }
 
   return adjustments;
+}
+
+/**
+ * Applies a spacing delta to a glyph as real sidebearings rather than pure tracking.
+ *
+ * Adding the delta to advanceWidth alone puts all the new space on the right of the glyph,
+ * which visibly shifts every letter towards the left of its own slot. Half the delta is
+ * therefore added to the left sidebearing by translating the outline, and the full delta to
+ * the advance width, so both sides grow equally.
+ */
+export function applySpacingDelta(glyph: any, delta: number): void {
+  if (!glyph || !delta) return;
+
+  const half = Math.round(delta / 2);
+
+  if (half !== 0 && glyph.path && Array.isArray(glyph.path.commands)) {
+    glyph.path.commands = glyph.path.commands.map((cmd: any) => {
+      const next: any = { ...cmd };
+      if (next.x !== undefined) next.x += half;
+      if (next.x1 !== undefined) next.x1 += half;
+      if (next.x2 !== undefined) next.x2 += half;
+      return next;
+    });
+  }
+
+  glyph.advanceWidth = Math.max(50, (glyph.advanceWidth || 500) + delta);
 }

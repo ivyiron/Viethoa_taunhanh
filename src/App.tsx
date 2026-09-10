@@ -24,7 +24,8 @@ import {
 } from './utils';
 import { AutoKerningStudio } from './components/AutoKerningStudio';
 import { HelpGuideModal } from './components/HelpGuideModal';
-import { generateFullFontKerningPairs, calculateAutoSpacingAdjustments, findGlyphIndex } from './utils/kerningEngine';
+import { generateFullFontKerningPairs, calculateAutoSpacingAdjustments, findGlyphIndex, applySpacingDelta } from './utils/kerningEngine';
+import { ensureCombiningMarkGlyphs, buildCcmpRules, addCcmpFeature, updateOS2ForVietnamese } from './utils/fontFeatures';
 import { Sliders, Sparkles, Download, RefreshCw, HelpCircle, Check, AlertTriangle, FileType, X, Settings2, LayoutGrid, ShieldCheck, CheckCircle2, FolderDown, FolderOpen, SlidersHorizontal } from 'lucide-react';
 
 const DEFAULT_SPACING_RULES: AutoSpacingRules = {
@@ -473,7 +474,7 @@ export default function App() {
         if (g && g.name) {
           const charStr = g.unicode ? String.fromCharCode(g.unicode) : g.name;
           if (autoSpacingMap[charStr]) {
-            g.advanceWidth = Math.max(50, (g.advanceWidth || 500) + autoSpacingMap[charStr]);
+            applySpacingDelta(g, autoSpacingMap[charStr]);
           }
         }
       }
@@ -553,12 +554,29 @@ export default function App() {
       // Since we use injectAdvancedLayoutTables below to perfectly copy the pristine layout tables 
       // byte-for-byte from the original font buffer, this bypasses the buggy serializer while 
       // completely preserving original kerning, ligatures, and features!
+      // Declare the Vietnamese coverage the font now actually has. Without these bits
+      // Adobe apps, Windows font fallback and language filters do not list the font as
+      // supporting Vietnamese even though every glyph is present.
+      updateOS2ForVietnamese(font);
+
+      // Build a 'ccmp' feature so decomposed input (e + U+0302 + U+0301) renders through the
+      // precomposed glyph. Combining mark glyphs are added first when the font lacks them,
+      // otherwise the shaper has nothing to match against.
+      ensureCombiningMarkGlyphs(font, templates, rules);
+      const ccmpRules = buildCcmpRules(font);
+      const ccmpInstalled = addCcmpFeature(font, ccmpRules);
+
       if (font.tables) {
         // NOTE: bit 6 of head.flags must stay 0 per the OpenType spec. OVERLAP_SIMPLE is a
         // per-glyph flag inside the 'glyf' table, not a head flag, so it is not set here.
         delete font.tables.gpos;
-        delete font.tables.gsub;
         delete font.tables.gdef;
+        // GSUB is kept so opentype.js serializes the original features together with ccmp.
+        // If no ccmp rule could be built there is nothing to merge, so fall back to copying
+        // the pristine GSUB bytes in injectAdvancedLayoutTables instead.
+        if (ccmpInstalled === 0) {
+          delete font.tables.gsub;
+        }
       }
 
       // Write font tables to binary OpenType ArrayBuffer
